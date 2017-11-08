@@ -1,0 +1,79 @@
+Difficulty level: NORMAL
+Use coal liquefaction: FALSE
+
+NOTES:
+* sulfuric-acid consumed in mining uranium-ore is included
+
+
+Targets:
+                             output/min
+    science-pack-1           100.000
+    science-pack-2           100.000
+    science-pack-3           100.000
+    production-science-pack  100.000
+    military-science-pack    100.000
+    high-tech-science-pack   100.000
+    rocket-part              10.000
+
+
+Ingredient(s):
+                                    trans/min   exec/min    builder                  units
+    advanced-circuit                2400.0      2400.0      assemling-machine-3      192
+    assembling-machine-1            100.0       100.0       assemling-machine-3      1
+    battery                         100.0       100.0       chemical-plant           7
+    copper-cable                    56700.0     56700.0     assemling-machine-3      378
+    copper-plate                    58900.0     58900.0     steel/electric-furnace   1718
+    electric-engine-unit            100.0       100.0       assemling-machine-3      14
+    electric-furnace                100.0       100.0       assemling-machine-3      7
+    electric-mining-drill           100.0       100.0       assemling-machine-3      3
+    electronic-circuit              14700.0     14700.0     assemling-machine-3      98
+    engine-unit                     200.0       200.0       assemling-machine-3      27
+    firearm-magazine                100.0       100.0       assemling-machine-3      2
+    grenade                         100.0       100.0       assemling-machine-3      11
+    gun-turret                      100.0       100.0       assemling-machine-3      11
+    high-tech-science-pack          100.0       100.0       assemling-machine-3      19
+    inserter                        100.0       100.0       assemling-machine-3      1
+    iron-gear-wheel                 2500.0      2500.0      assemling-machine-3      17
+    iron-plate                      36780.0     36780.0     steel/electric-furnace   1073
+    low-density-structure           100.0       100.0       assemling-machine-3      40
+    lubricant                       1500.0      150.0       chemical-plant           2
+    military-science-pack           100.0       100.0       assemling-machine-3      14
+    piercing-rounds-magazine        100.0       100.0       assemling-machine-3      4
+    pipe                            400.0       400.0       assemling-machine-3      3
+    plastic-bar                     5300.0      2650.0      chemical-plant           36
+    processing-unit                 400.0       400.0       assemling-machine-3      54
+    production-science-pack         100.0       100.0       assemling-machine-3      19
+    rocket-control-unit             100.0       100.0       assemling-machine-3      40
+    rocket-fuel                     100.0       100.0       assemling-machine-3      40
+    rocket-part                     10.0        10.0        rocket-silo              1
+    science-pack-1                  100.0       100.0       assemling-machine-3      7
+    science-pack-2                  100.0       100.0       assemling-machine-3      8
+    science-pack-3                  100.0       100.0       assemling-machine-3      16
+    speed-module                    200.0       200.0       assemling-machine-3      40
+    steel-plate                     2300.0      2300.0      steel/electric-furnace   336
+    stone-brick                     1000.0      1000.0      steel/electric-furnace   30
+    sulfur                          400.0       200.0       chemical-plant           3
+    sulfuric-acid                   4000.0      80.0        chemical-plant           2
+    transport-belt                  100.0       100.0       assemling-machine-3      1
+
+
+Uranium process(es): (BETA)
+                                    exec/min   builder                  units
+
+
+Oil process(es):
+                                    exec/min   builder                  units
+    advanced-oil-processing         738.0      oil-refinery             62
+    heavy-oil-cracking              147.0      chemical-plant           6
+    light-oil-cracking              920.6      chemical-plant           37
+    solid-fuel-from-light-oil       1000.0     chemical-plant           40
+
+
+Raw material(s):
+                                    input/min
+    coal                            3650.0
+    copper-ore                      58900.0
+    crude-oil                       73796.3
+    iron-ore                        36780.0
+    stone                           2000.0
+    water                           82925.9

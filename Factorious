@@ -1,0 +1,253 @@
+#!/usr/bin/python
+
+import json
+import numpy
+import sys
+import math
+from scipy.optimize import linprog
+import argparse
+import csv
+
+db_recipe_default = "./recipeNormal.v0.15.json"
+db_recipe_odd_default = "./recipeOdd.v0.15.json"
+db_builder_default = "./builder.v0.15.json"
+
+# options
+parser = argparse.ArgumentParser(description = "Calculate the material and builders required for specific outputs in Fatctorio (0.15)")
+parser.add_argument("-dbr", "--db-recipe", default = db_recipe_default, help = "database json file for normal recipes information (default '%s')" % db_recipe_default, metavar = "<JSON>")
+parser.add_argument("-dbo", "--db-odd", default = db_recipe_odd_default, help = "database json file for odd recipes information (default '%s')" % db_recipe_odd_default, metavar = "<JSON>")
+parser.add_argument("-dbb", "--db-builder", default = db_builder_default, help = "database json file for builder information (default '%s')" % db_builder_default, metavar = "<JSON>")
+parser.add_argument("-f", "--file", help = "input file with target output data, if not set, reads from stdin; each line contains the name of the product and an output rate (per min), separated by comma (,) (example: 'transport-belt,10')", metavar = "<CSV>", required = False)
+parser.add_argument("-e", "--expensive", action = "store_true", help = "use expensive difficulty for ingredients calculation", required = False)
+parser.add_argument("-l", "--liquefaction", action = "store_true", help = "coal liquefaction is maximized", required = False)
+args = parser.parse_args()
+
+# const lists used for further processes
+raw_material_terminators = ["water", "steam", "coal", "copper-ore", "iron-ore", "stone", "crude-oil", "raw-wood"]
+oil_process_identifier = ["petroleum-gas", "light-oil", "heavy-oil", "solid-fuel"]
+uranium_recipe_identifier = ["uranium-235", "uranium-238"]
+
+with open(args.db_recipe, "r") as fread:
+	all_recipes = json.load(fread)
+with open(args.db_odd, "r") as fread:
+	odd_recipe = json.load(fread)
+with open(args.db_builder, "r") as fread:
+	category_builder = json.load(fread)
+
+# read target outputs data
+target_file = (args.file and open(args.file, "r") or sys.stdin)
+final_products = [(l[0], float(l[1])) for l in csv.reader(target_file, delimiter = ",")]
+if args.file: target_file.close()
+
+# process recipes data
+def ExtractDifficultyInPlace(recipe_list, is_expensive, check_res_count = False):
+	for recipe_name, recipe in recipe_list.iteritems():
+		if recipe.has_key("normal"):
+			# this recipe looks different under different diffifulty
+			if is_expensive:
+				for k, v in recipe["expensive"].iteritems():
+					recipe[k] = v
+			else:
+				for k, v in recipe["normal"].iteritems():
+					recipe[k] = v
+		if check_res_count:
+			# dealing with odd things
+			if (recipe.has_key("results")):
+				results = recipe["results"].keys()
+				if (len(results) == 1):
+					recipe["result_count"] = recipe["results"][results[0]]
+				else:
+					print >>sys.stderr, "something odd with recipe %s" % recipe_name
+
+ExtractDifficultyInPlace(all_recipes, args.expensive, True) # recheck result with normal recipes
+ExtractDifficultyInPlace(odd_recipe, args.expensive)
+
+# check for everything input is valid
+for i in final_products:
+	if (not (all_recipes.has_key(i[0]) or (i[0] in oil_process_identifier) or (i[0] in uranium_recipe_identifier))):
+		print "bad input: '%s'" % i[0]
+		exit(0)
+
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+# utility function
+# oil process matrix for linear programming
+def BuildOilProcessMatrix(odd_recipe, max_liquefaction):
+	oil_processes = []
+	oil_process_matrix = []
+	oil_process_linprog_coef = []
+
+	for k in sorted(odd_recipe.keys()):
+		recipe = odd_recipe[k]
+		if ((recipe["category"] == "oil-processing") or (recipe["category"] == "chemistry")):
+			if ((k != "coal-liquefaction") or max_liquefaction):
+				oil_processes.append(k)
+				t = [0] * len(oil_process_identifier)
+				for ing, val in recipe["ingredients"].iteritems():
+					if (ing in oil_process_identifier):
+						t[oil_process_identifier.index(ing)] = -val
+				for ing, val in recipe["results"].iteritems():
+					if (ing in oil_process_identifier):
+						t[oil_process_identifier.index(ing)] = val
+				oil_process_matrix.append(t)
+				oil_process_linprog_coef.append(int(k == "basic-oil-processing") or (k == "advanced-oil-processing"))
+	oil_processes = oil_processes + ["petroleum-gas-waste", "light-oil-waste", "heavy-oil-waste"]
+	oil_process_matrix = oil_process_matrix + [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0]]
+	oil_process_linprog_coef = oil_process_linprog_coef + [1.0, 0.3, 0.1] # the less waste the better, and avoid useless cracking
+	return oil_processes, numpy.asarray(oil_process_matrix).T, oil_process_linprog_coef
+
+
+# calculate basic recipes
+def AddIngredientToTable(table, item, rate):
+	if (rate > 0.000):
+		if (item in table):
+			table[item] = table[item] + rate
+		else:
+			table[item] = rate
+
+def FindRecipeIngredient(item, rate, ingredients, oil_process_products, uranium_process_products, raw_materials):
+	if (item in oil_process_identifier):
+		AddIngredientToTable(oil_process_products, item, rate)
+	elif (item in uranium_recipe_identifier):
+		AddIngredientToTable(uranium_process_products, item, rate)
+	elif not (item in all_recipes):
+		AddIngredientToTable(raw_materials, item, rate)
+	else:
+		AddIngredientToTable(ingredients, item, rate)
+		recipe = all_recipes[item]
+		for ing, amt in recipe["ingredients"].iteritems():
+			FindRecipeIngredient(ing, rate * amt / recipe["result_count"], ingredients, oil_process_products, uranium_process_products, raw_materials)
+
+
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+ingredients = {}
+oil_process_products = {}
+uranium_process_products = {"uranium-235":0.0, "uranium-238":0.0}
+raw_materials = {}
+oil_processes, oil_process_matrix, oil_process_linprog_coef = BuildOilProcessMatrix(odd_recipe, args.liquefaction)
+
+# calculate basic recipes; odd materials stored #####
+for product, rate in final_products:
+	FindRecipeIngredient(product, rate, ingredients, oil_process_products, uranium_process_products, raw_materials)
+
+
+# cauculate uranium processes, BETA BETA BETA BETA BETA BETA BETA BETA #####
+# this part is hard coded because of specificity
+uranium_fuel_cells = sum([((t[0] == "uranium-fuel-cell") and t[1] or 0) for t in final_products])
+#							u-235	u-238	cell	ore		X
+# uranium-processing		0.007	0.993	0		-1		x1
+# kovarex-enrichment (net)	1		-3		0		0		x2
+# used-cell-reprocess		0		3		-5		0		x3
+# Y (solve of the eq.s)		a		b		-c		?
+def SolveUraniumProcesses(uranium_process_products, uranium_fuel_cells):
+	ret_exec = [0.0, 0.0, uranium_fuel_cells / 5.0, 0.0, 0.0]
+	u_235 = uranium_process_products["uranium-235"]
+	u_238 = uranium_process_products["uranium-238"] - 0.6 * uranium_fuel_cells # from reprocessing
+	if (u_235 >= 0.007 * (u_235 + u_238)):
+		# require enrichment
+		ret_exec[0] = (3.0 * u_235 + u_238) / 1.014
+		ret_exec[1] = (0.993 * u_235 - 0.007 * u_238) / 1.014
+	else:
+		# no need for enrichment, potentially waste of u-235
+		ret_exec[0] = u_238 / 0.993
+		ret_exec[3] = u_238 / 0.993 * 0.007 - u_235
+	return ret_exec
+
+uranium_process_execs = SolveUraniumProcesses(uranium_process_products, uranium_fuel_cells)
+if (uranium_process_execs[0] > 0.000):
+	AddIngredientToTable(raw_materials, "uranium-ore", uranium_process_execs[0])
+# add sulfiric acid (mining)
+FindRecipeIngredient("sulfuric-acid", uranium_process_execs[0], ingredients, oil_process_products, uranium_process_products, raw_materials)
+
+# cauculate oil processes #####
+# using linear programming
+oil_process_products = numpy.array([((oil_process_products.has_key(ing)) and oil_process_products[ing] or 0) for ing in oil_process_identifier], dtype = float)
+# known issue:
+# sometimes large number cause failure in linear programming
+# searching down by 10-fold
+scale = 0
+while True:
+	oil_process_linprog = linprog(oil_process_linprog_coef, A_eq = oil_process_matrix, b_eq = oil_process_products, bounds = [(0, None)] * len(oil_process_matrix[0]))
+	if oil_process_linprog.success:
+		oil_process_execs = oil_process_linprog.x * (10 ** scale)
+		break
+	else:
+		scale = scale + 1
+		oil_process_products = oil_process_products / 10
+
+# update non-oil ingredients
+for index, process in enumerate(oil_processes):
+	exec_rate = oil_process_execs[index]
+	if (process[-5:] != "waste"):
+		recipe = odd_recipe[process]
+		for item, amt in recipe["ingredients"].iteritems():
+			if not (item in oil_process_identifier):
+				AddIngredientToTable(raw_materials, item, exec_rate * amt)
+
+
+## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+# output
+print "Difficulty level: %s" % (args.expensive and "EXPENSIVE" or "NORMAL")
+print "Use coal liquefaction: %s" % (args.liquefaction and "TRUE" or "FALSE")
+print "\nNOTES:"
+print "* sulfuric-acid consumed in mining uranium-ore is included"
+
+# ####################
+print "\n\nTargets:"
+pattern_title = "    {:<25}{}"
+pattern_data = "    {:<25}{:<.3f}"
+print pattern_title.format("", "output/min")
+for item, rate in final_products:
+	print pattern_data.format(item, rate)
+
+# ####################
+print "\n\nIngredient(s):"
+pattern_title = "    {:<32}{:<12}{:<12}{:<25}{}"
+pattern_data = "    {:<32}{:<12.1f}{:<12.1f}{:<25}{:<.0f}"
+print pattern_title.format("", "trans/min", "exec/min", "builder", "units")
+for item in sorted(ingredients.keys()):
+	rate = ingredients[item]
+	if not (item in all_recipes):
+		continue
+	recipe = all_recipes[item]
+	builder = category_builder[recipe["category"]]
+	exec_rate = rate / recipe["result_count"]
+	print pattern_data.format(item, rate, exec_rate, builder["builder"], math.ceil(exec_rate * recipe["craft_time"] / builder["speed_factor"] / 60))
+
+# ####################
+print "\n\nUranium process(es): (BETA)"
+pattern_title = "    {:<32}{:<11}{:<25}{}"
+pattern_data = "    {:<32}{:<11.1f}{:<25}{:<.0f}"
+pattern_waste = "    {:<32}{:<11.2f}{:<25}"
+print pattern_title.format("", "exec/min", "builder", "units")
+if (uranium_process_execs[0] > 0.000):
+	print pattern_data.format("uranium-processing", uranium_process_execs[0], "centrifuge", uranium_process_execs[0] / 0.5)
+if (uranium_process_execs[1] > 0.000):
+	print pattern_data.format("kovarex-enrichment-process", uranium_process_execs[1], "centrifuge", uranium_process_execs[1] / 0.5)
+if (uranium_process_execs[2] > 0.000):
+	print pattern_data.format("nuclear-fuel-reprocessing", uranium_process_execs[2], "centrifuge", uranium_process_execs[2] / 0.5)
+if (uranium_process_execs[3] > 0.000):
+	print pattern_waste.format("u-235-waste", uranium_process_execs[3], "residue-waste")
+
+# ####################
+print "\n\nOil process(es):"
+pattern_title = "    {:<32}{:<11}{:<25}{}"
+pattern_data = "    {:<32}{:<11.1f}{:<25}{:<.0f}"
+pattern_waste = "    {:<32}{:<11.1f}{:<25}"
+print pattern_title.format("", "exec/min", "builder", "units")
+for index, process in enumerate(oil_processes):
+	exec_rate = oil_process_execs[index]
+	if exec_rate > 0.000:
+		if (process[-5:] != "waste"):
+			recipe = odd_recipe[process]
+			builder = category_builder[recipe["category"]]
+			print pattern_data.format(process, exec_rate, builder["builder"], math.ceil(exec_rate * recipe["craft_time"] / builder["speed_factor"] / 60))
+		else:
+			print pattern_waste.format(process, exec_rate, "residue-waste")
+
+# ####################
+print "\n\nRaw material(s):"
+pattern_title = "    {:<32}{}"
+pattern_data = "    {:<32}{:<.1f}"
+print pattern_title.format("", "input/min")
+for item in sorted(raw_materials.keys()):
+	print pattern_data.format(item, raw_materials[item])

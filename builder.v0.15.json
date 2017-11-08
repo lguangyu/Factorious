@@ -1,0 +1,34 @@
+{
+	"smelting": {
+		"builder": "steel/electric-furnace",
+		"speed_factor": 2.00
+	},
+	"crafting": {
+		"builder": "assemling-machine-3",
+		"speed_factor": 1.25
+	},
+	"advanced-crafting": {
+		"builder": "assemling-machine-3",
+		"speed_factor": 1.25
+	},
+	"crafting-with-fluid": {
+		"builder": "assemling-machine-3",
+		"speed_factor": 1.25
+	},
+	"oil-processing": {
+		"builder": "oil-refinery",
+		"speed_factor": 1.00
+	},
+	"chemistry": {
+		"builder": "chemical-plant",
+		"speed_factor": 1.25
+	},
+	"rocket-building": {
+		"builder": "rocket-silo",
+		"speed_factor": 1.00
+	},
+	"centrifuging": {
+		"builder": "centrifuge",
+		"speed_factor": 0.5
+	}
+}

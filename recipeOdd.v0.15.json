@@ -1,0 +1,126 @@
+{
+	"basic-oil-processing": {
+		"category": "oil-processing",
+		"craft_time": 5.0,
+		"ingredients": {
+			"crude-oil": 100
+		},
+		"results": {
+			"heavy-oil": 30,
+			"light-oil": 30,
+			"petroleum-gas": 40
+		}
+	},
+	"advanced-oil-processing": {
+		"category": "oil-processing",
+		"craft_time": 5.0,
+		"ingredients": {
+			"water": 50,
+			"crude-oil": 100
+		},
+		"results": {
+			"heavy-oil": 10,
+			"light-oil": 45,
+			"petroleum-gas": 55
+		}
+	},
+	"coal-liquefaction": {
+		"category": "oil-processing",
+		"craft_time": 5.0,
+		"ingredients": {
+			"coal": 10,
+			"heavy-oil": 25,
+			"steam": 50
+		},
+		"results": {
+			"heavy-oil": 35,
+			"light-oil": 15,
+			"petroleum-gas": 20
+		}
+	},
+	"heavy-oil-cracking": {
+		"category": "chemistry",
+		"craft_time": 3.0,
+		"ingredients": {
+			"water": 30,
+			"heavy-oil": 40
+		},
+		"results": {
+			"light-oil": 30
+		}
+	},
+	"light-oil-cracking": {
+		"category": "chemistry",
+		"craft_time": 3.0,
+		"ingredients": {
+			"water": 30,
+			"light-oil": 30
+		},
+		"results": {
+			"petroleum-gas": 20
+		}
+	},
+	"solid-fuel-from-light-oil": {
+		"category": "chemistry",
+		"craft_time": 3.0,
+		"ingredients": {
+			"light-oil": 10
+		},
+		"results": {
+			"solid-fuel": 1
+		}
+	},
+	"solid-fuel-from-petroleum-gas": {
+		"category": "chemistry",
+		"craft_time": 3.0,
+		"ingredients": {
+			"petroleum-gas": 20
+		},
+		"results": {
+			"solid-fuel": 1
+		}
+	},
+	"solid-fuel-from-heavy-oil": {
+		"category": "chemistry",
+		"craft_time": 3.0,
+		"ingredients": {
+			"heavy-oil": 20
+		},
+		"results": {
+			"solid-fuel": 1
+		}
+	},
+	"uranium-processing": {
+		"category": "centrifuging",
+		"craft_time": 10.0,
+		"ingredients": {
+			"uranium-ore": 10
+		},
+		"results": {
+			"uranium-235": 1,
+			"uranium-238": 1
+		}
+	},
+	"kovarex-enrichment-process": {
+		"category": "centrifuging",
+		"craft_time": 50.0,
+		"ingredients": {
+			"uranium-235": 40,
+			"uranium-238": 5
+		},
+		"results": {
+			"uranium-235": 41,
+			"uranium-238": 2
+		}
+	},
+	"nuclear-fuel-reprocessing": {
+		"category": "centrifuging",
+		"craft_time": 50.0,
+		"ingredients": {
+			"used-up-uranium-fuel-cell": 5
+		},
+		"results": {
+			"uranium-238": 3
+		}
+	}
+}
