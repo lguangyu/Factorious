@@ -29,6 +29,6 @@
 	},
 	"centrifuging": {
 		"builder": "centrifuge",
-		"speed_factor": 0.5
+		"speed_factor": 0.75
 	}
 }

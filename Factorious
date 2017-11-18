@@ -220,11 +220,11 @@ pattern_data = "    {:<32}{:<11.1f}{:<25}{:<.0f}"
 pattern_waste = "    {:<32}{:<11.2f}{:<25}"
 print pattern_title.format("", "exec/min", "builder", "units")
 if (uranium_process_execs[0] > 0.000):
-	print pattern_data.format("uranium-processing", uranium_process_execs[0], "centrifuge", uranium_process_execs[0] / 0.5)
+	print pattern_data.format("uranium-processing", uranium_process_execs[0], "centrifuge", math.ceil(uranium_process_execs[0] * 10.0 / 0.75 / 60))
 if (uranium_process_execs[1] > 0.000):
-	print pattern_data.format("kovarex-enrichment-process", uranium_process_execs[1], "centrifuge", uranium_process_execs[1] / 0.5)
+	print pattern_data.format("kovarex-enrichment-process", uranium_process_execs[1], "centrifuge", math.ceil(uranium_process_execs[1] * 50.0 / 0.75 / 60))
 if (uranium_process_execs[2] > 0.000):
-	print pattern_data.format("nuclear-fuel-reprocessing", uranium_process_execs[2], "centrifuge", uranium_process_execs[2] / 0.5)
+	print pattern_data.format("nuclear-fuel-reprocessing", uranium_process_execs[2], "centrifuge", math.ceil(uranium_process_execs[2] * 50.0 / 0.75 / 60))
 if (uranium_process_execs[3] > 0.000):
 	print pattern_waste.format("u-235-waste", uranium_process_execs[3], "residue-waste")
 
