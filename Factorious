@@ -1,253 +1,323 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
-import json
-import numpy
+import io
 import sys
+import json
 import math
-from scipy.optimize import linprog
 import argparse
-import csv
+#import textwrap
+import itertools
+import collections
 
-db_recipe_default = "./recipeNormal.v0.15.json"
-db_recipe_odd_default = "./recipeOdd.v0.15.json"
-db_builder_default = "./builder.v0.15.json"
+import facc
+import facc.factorio_tunes
 
-# options
-parser = argparse.ArgumentParser(description = "Calculate the material and builders required for specific outputs in Fatctorio (0.15)")
-parser.add_argument("-dbr", "--db-recipe", default = db_recipe_default, help = "database json file for normal recipes information (default '%s')" % db_recipe_default, metavar = "<JSON>")
-parser.add_argument("-dbo", "--db-odd", default = db_recipe_odd_default, help = "database json file for odd recipes information (default '%s')" % db_recipe_odd_default, metavar = "<JSON>")
-parser.add_argument("-dbb", "--db-builder", default = db_builder_default, help = "database json file for builder information (default '%s')" % db_builder_default, metavar = "<JSON>")
-parser.add_argument("-f", "--file", help = "input file with target output data, if not set, reads from stdin; each line contains the name of the product and an output rate (per min), separated by comma (,) (example: 'transport-belt,10')", metavar = "<CSV>", required = False)
-parser.add_argument("-e", "--expensive", action = "store_true", help = "use expensive difficulty for ingredients calculation", required = False)
-parser.add_argument("-l", "--liquefaction", action = "store_true", help = "coal liquefaction is maximized", required = False)
-args = parser.parse_args()
 
-# const lists used for further processes
-raw_material_terminators = ["water", "steam", "coal", "copper-ore", "iron-ore", "stone", "crude-oil", "raw-wood"]
-oil_process_identifier = ["petroleum-gas", "light-oil", "heavy-oil", "solid-fuel"]
-uranium_recipe_identifier = ["uranium-235", "uranium-238"]
+TIME_UNITS = ["sec", "min", "hr"]
+TIME_TO_SEC = {
+	"sec": 1.0,
+	"min": 60.0,
+	"hr": 3600.0,
+}
+FACTORIO = facc.load_factorio_version_tunes("0.15")
 
-with open(args.db_recipe, "r") as fread:
-	all_recipes = json.load(fread)
-with open(args.db_odd, "r") as fread:
-	odd_recipe = json.load(fread)
-with open(args.db_builder, "r") as fread:
-	category_builder = json.load(fread)
 
-# read target outputs data
-target_file = (args.file and open(args.file, "r") or sys.stdin)
-final_products = [(l[0], float(l[1])) for l in csv.reader(target_file, delimiter = ",")]
-if args.file: target_file.close()
+def get_args():
+	ap = argparse.ArgumentParser()
+	ap.add_argument("targets", type = str,
+		help = "production targets for calculation, in <item,rate> format for\
+			each target, separated by plus (+) between targets; for example,\
+			'inserter,10+iron-plate,20+science-pack-1,10'; read from stdin if\
+			set to -, assuming in CSV format (each line being a target)")
+	#
+	ag = ap.add_argument_group("basic options")
+	ag.add_argument("-r", "--recipe", type = str,
+		metavar = "json", required = True,
+		help = "recipe data file in json format (required)")
+	ag.add_argument("--list-items", action = "store_true",
+		help = "list all items in loaded recipe file and exit")
+	ag.add_argument("--list-recipes", action = "store_true",
+		help = "list all recipes in loaded recipe file and exit")
+	ag.add_argument("-y", "--yield-level", type = str,
+		choices = ["normal", "expensive"], default = "normal",
+		help = "yield difficulty level (default: normal)")
+	ag.add_argument("-u", "--rate-unit", type = str,
+		choices = ["sec", "min", "hr"], default = "min",
+		help = "assume <targets> production in per <unit> rate (default: min)")
+	ag.add_argument("-g", "--graph", type = str, metavar = "png",
+		help = "add a graphic visualization in addition to tabular output")
+	# 
+	ag = ap.add_argument_group("recipe/item options")
+	ag.add_argument("-L", "--without-coal-liquefaction", action = "store_true",
+		help = "exclude coal liquefaction recipe (default: off)")
+	ag.add_argument("-O", "--without-oil-processing", action = "store_true",
+		help = "exclude both basic and advanced oil processing recipes, tends\
+		to source oil products from coal liquefaction (default: off)")
+	ag.add_argument("--trivial-items", type = str,
+		metavar = "item1,item2,...", default = FACTORIO.COMMON_TRIVIALS_STR,
+		help = "assign listed items, separated by comma (,), to be trivial;\
+			trivial items are regard as raw material and excluded from\
+			optimization on consumption (default: %s)"\
+			% FACTORIO.COMMON_TRIVIALS_STR)
+	ag = ap.add_argument_group("optimization options")
+	ag.add_argument("--tolerance", type = float,
+		metavar = "float", default = 1e-6,
+		help = "float comparison tolerance used in optimization (default: 1e-6)")
+	args = ap.parse_args()
+	return args
 
-# process recipes data
-def ExtractDifficultyInPlace(recipe_list, is_expensive, check_res_count = False):
-	for recipe_name, recipe in recipe_list.iteritems():
-		if recipe.has_key("normal"):
-			# this recipe looks different under different diffifulty
-			if is_expensive:
-				for k, v in recipe["expensive"].iteritems():
-					recipe[k] = v
+
+def main():
+	args = get_args()
+	# resolving args
+	targets = args_get_targets(args)
+	ex_recipes = args_get_excluded_recipes(args)
+	trivials = args_get_trivials(args)
+	obj_scales = get_optim_obj_scales(trivials)
+	# load, refining data
+	recp_list = load_raw_recipes(args.recipe)
+	# make RecipeSet
+	append_madeup_recipes_inplace(recp_list, args)
+	recipe_set = get_recipe_set(recp_list,
+		yield_level = args.yield_level,
+		excluded_recipes = ex_recipes,
+		trivial_items = trivials)
+	if args.list_items:
+		print_iterator(recipe_set.iterate_items())
+		return
+	if args.list_recipes:
+		print_iterator(recipe_set.iterate_recipes())
+		return
+	# make production calc. object
+	prod_tree = ExportableProductionTree(recipe_set)
+	# do calculation
+	prod_tree.calculate_targets(targets,\
+		optim_args = dict(
+			scales = obj_scales,
+			tol = args.tolerance))
+	# output
+	prod_tree.to_tabular(file = sys.stdout, time_unit = args.rate_unit)
+	if args.graph:
+		prod_tree.visualize(file = args.graph)
+	return
+
+
+################################################################################
+# viewing
+def print_iterator(it: iter) -> None:
+	for i in sorted(it):
+		print(i, file = sys.stdout)
+
+################################################################################
+# target parsing
+_tp_rm_empty = lambda x: bool(x) # filter empty strings
+_tp_split_comma = lambda x: x.split(",")
+# unpack (str, str) -> str, float -> for construct dict {key: value}
+_tp_unpack = lambda x: (x[0], float(x[1]))
+target_parser = lambda x: _tp_unpack(_tp_split_comma(x))
+
+
+def _parse_targets_from_clistr(s: str) -> dict:
+	_f = filter(_tp_rm_empty, s.split(":"))
+	return dict(map(target_parser, _f))
+
+
+def _parse_targets_from_csvstr(s: str) -> dict:
+	_f = itertools.filter(_tp_rm_empty, s.split(":"))
+	return dict(map(target_parser, _f))
+
+
+def args_get_targets(_args) -> dict:
+	if _args.targets == "-":
+		return _parse_targets_from_csvstr(sys.stdin.read())
+	else:
+		return _parse_targets_from_clistr(_args.targets)
+
+
+################################################################################
+# load recipes
+def load_raw_recipes(json_f: str) -> list:
+	with open(json_f, "r") as fh:
+		rs = json.load(fh)
+	# ensure list
+	if isinstance(rs, dict):
+		# returning iterator
+		rs = list(rs.values())
+	return rs
+
+
+def append_madeup_recipes_inplace(recipe_list, _args):
+	# no need to show madeup recipes in these commands
+	if _args.list_items or _args.list_recipes:
+		return
+	recipe_list += FACTORIO.MADEUP_RECIPES
+
+
+def get_recipe_set(raws, *,
+		yield_level = "normal",
+		excluded_recipes: list = [],
+		trivial_items: list = [],
+	) -> list:
+	# create Recipe objects
+	recipes = []
+	for v in itertools.chain(raws):
+		if v["name"] not in excluded_recipes:
+			if v.get(yield_level, None):
+			# we tried to replace it with None on with missed "expensive"s,
+			# thus below should be fine :)
+			#if v[mode]:
+				group = v[yield_level]
 			else:
-				for k, v in recipe["normal"].iteritems():
-					recipe[k] = v
-		if check_res_count:
-			# dealing with odd things
-			if (recipe.has_key("results")):
-				results = recipe["results"].keys()
-				if (len(results) == 1):
-					recipe["result_count"] = recipe["results"][results[0]]
-				else:
-					print >>sys.stderr, "something odd with recipe %s" % recipe_name
-
-ExtractDifficultyInPlace(all_recipes, args.expensive, True) # recheck result with normal recipes
-ExtractDifficultyInPlace(odd_recipe, args.expensive)
-
-# check for everything input is valid
-for i in final_products:
-	if (not (all_recipes.has_key(i[0]) or (i[0] in oil_process_identifier) or (i[0] in uranium_recipe_identifier))):
-		print "bad input: '%s'" % i[0]
-		exit(0)
-
-## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
-# utility function
-# oil process matrix for linear programming
-def BuildOilProcessMatrix(odd_recipe, max_liquefaction):
-	oil_processes = []
-	oil_process_matrix = []
-	oil_process_linprog_coef = []
-
-	for k in sorted(odd_recipe.keys()):
-		recipe = odd_recipe[k]
-		if ((recipe["category"] == "oil-processing") or (recipe["category"] == "chemistry")):
-			if ((k != "coal-liquefaction") or max_liquefaction):
-				oil_processes.append(k)
-				t = [0] * len(oil_process_identifier)
-				for ing, val in recipe["ingredients"].iteritems():
-					if (ing in oil_process_identifier):
-						t[oil_process_identifier.index(ing)] = -val
-				for ing, val in recipe["results"].iteritems():
-					if (ing in oil_process_identifier):
-						t[oil_process_identifier.index(ing)] = val
-				oil_process_matrix.append(t)
-				oil_process_linprog_coef.append(int(k == "basic-oil-processing") or (k == "advanced-oil-processing"))
-	oil_processes = oil_processes + ["petroleum-gas-waste", "light-oil-waste", "heavy-oil-waste"]
-	oil_process_matrix = oil_process_matrix + [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0]]
-	oil_process_linprog_coef = oil_process_linprog_coef + [1.0, 0.3, 0.1] # the less waste the better, and avoid useless cracking
-	return oil_processes, numpy.asarray(oil_process_matrix).T, oil_process_linprog_coef
+				group = v["normal"]
+			_r = facc.Recipe(name = v["name"], category = v["category"],
+				inputs = group["ingredients"], products = group["results"],
+				craft_time = group["craft_time"])
+			recipes.append(_r)
+	# construct recipe set
+	recipe_set = facc.RecipeSet(recipes, copy = True, net_yield = True)
+	recipe_set.set_trivials(trivial_items)
+	return recipe_set
 
 
-# calculate basic recipes
-def AddIngredientToTable(table, item, rate):
-	if (rate > 0.000):
-		if (item in table):
-			table[item] = table[item] + rate
-		else:
-			table[item] = rate
-
-def FindRecipeIngredient(item, rate, ingredients, oil_process_products, uranium_process_products, raw_materials):
-	if (item in oil_process_identifier):
-		AddIngredientToTable(oil_process_products, item, rate)
-	elif (item in uranium_recipe_identifier):
-		AddIngredientToTable(uranium_process_products, item, rate)
-	elif not (item in all_recipes):
-		AddIngredientToTable(raw_materials, item, rate)
-	else:
-		AddIngredientToTable(ingredients, item, rate)
-		recipe = all_recipes[item]
-		for ing, amt in recipe["ingredients"].iteritems():
-			FindRecipeIngredient(ing, rate * amt / recipe["result_count"], ingredients, oil_process_products, uranium_process_products, raw_materials)
+def args_get_excluded_recipes(_args) -> list:
+	ret = []
+	if _args.without_coal_liquefaction:
+		ret.append("coal-liquefaction")
+	if _args.without_oil_processing:
+		ret.append("basic-oil-processing")
+		ret.append("advanced-oil-processing")
+	return ret
 
 
-## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
-ingredients = {}
-oil_process_products = {}
-uranium_process_products = {"uranium-235":0.0, "uranium-238":0.0}
-raw_materials = {}
-oil_processes, oil_process_matrix, oil_process_linprog_coef = BuildOilProcessMatrix(odd_recipe, args.liquefaction)
-
-# calculate basic recipes; odd materials stored #####
-for product, rate in final_products:
-	FindRecipeIngredient(product, rate, ingredients, oil_process_products, uranium_process_products, raw_materials)
+def args_get_trivials(_args) -> list:
+	return _args.trivial_items.split(",")
 
 
-# cauculate uranium processes, BETA BETA BETA BETA BETA BETA BETA BETA #####
-# this part is hard coded because of specificity
-uranium_fuel_cells = sum([((t[0] == "uranium-fuel-cell") and t[1] or 0) for t in final_products])
-#							u-235	u-238	cell	ore		X
-# uranium-processing		0.007	0.993	0		-1		x1
-# kovarex-enrichment (net)	1		-3		0		0		x2
-# used-cell-reprocess		0		3		-5		0		x3
-# Y (solve of the eq.s)		a		b		-c		?
-def SolveUraniumProcesses(uranium_process_products, uranium_fuel_cells):
-	ret_exec = [0.0, 0.0, uranium_fuel_cells / 5.0, 0.0, 0.0]
-	u_235 = uranium_process_products["uranium-235"]
-	u_238 = uranium_process_products["uranium-238"] - 0.6 * uranium_fuel_cells # from reprocessing
-	if (u_235 >= 0.007 * (u_235 + u_238)):
-		# require enrichment
-		ret_exec[0] = (3.0 * u_235 + u_238) / 1.014
-		ret_exec[1] = (0.993 * u_235 - 0.007 * u_238) / 1.014
-	else:
-		# no need for enrichment, potentially waste of u-235
-		ret_exec[0] = u_238 / 0.993
-		ret_exec[3] = u_238 / 0.993 * 0.007 - u_235
-	return ret_exec
-
-uranium_process_execs = SolveUraniumProcesses(uranium_process_products, uranium_fuel_cells)
-if (uranium_process_execs[0] > 0.000):
-	AddIngredientToTable(raw_materials, "uranium-ore", uranium_process_execs[0])
-# add sulfiric acid (mining)
-FindRecipeIngredient("sulfuric-acid", uranium_process_execs[0], ingredients, oil_process_products, uranium_process_products, raw_materials)
-
-# cauculate oil processes #####
-# using linear programming
-oil_process_products = numpy.array([((oil_process_products.has_key(ing)) and oil_process_products[ing] or 0) for ing in oil_process_identifier], dtype = float)
-# known issue:
-# sometimes large number cause failure in linear programming
-# searching down by 10-fold
-scale = 0
-while True:
-	oil_process_linprog = linprog(oil_process_linprog_coef, A_eq = oil_process_matrix, b_eq = oil_process_products, bounds = [(0, None)] * len(oil_process_matrix[0]))
-	if oil_process_linprog.success:
-		oil_process_execs = oil_process_linprog.x * (10 ** scale)
-		break
-	else:
-		scale = scale + 1
-		oil_process_products = oil_process_products / 10
-
-# update non-oil ingredients
-for index, process in enumerate(oil_processes):
-	exec_rate = oil_process_execs[index]
-	if (process[-5:] != "waste"):
-		recipe = odd_recipe[process]
-		for item, amt in recipe["ingredients"].iteritems():
-			if not (item in oil_process_identifier):
-				AddIngredientToTable(raw_materials, item, exec_rate * amt)
+def get_optim_obj_scales(excludes: list or dict = []) -> dict:
+	# currently this function does not support user specification
+	# fluids are 1/10 of solids for balance
+	ret = {i: 0.1 for i in FACTORIO.FLUIDS if i not in excludes}
+	return ret
 
 
-## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
+################################################################################
 # output
-print "Difficulty level: %s" % (args.expensive and "EXPENSIVE" or "NORMAL")
-print "Use coal liquefaction: %s" % (args.liquefaction and "TRUE" or "FALSE")
-print "\nNOTES:"
-print "* sulfuric-acid consumed in mining uranium-ore is included"
+def _fmt_float(v, len_lim = 7, strip_int = False):
+	low_lim = math.pow(10, max(3 - len_lim, -4))
+	high_lim = math.pow(10, len_lim + 1)
+	_abs_v = abs(v)
+	_int_v = int(round(v))
+	if (_abs_v < low_lim) or (_abs_v >= high_lim):
+		_format = "%%.%de" % min(len_lim - 6, 3)
+	elif strip_int and math.isclose(v, _int_v) and _int_v >= 10:
+		return str(_int_v)
+	elif _abs_v < 0.01:
+		_format = "%%.%df" % min(len_lim - 2, 4)
+	elif _abs_v < 0.1:
+		_format = "%%.%df" % min(len_lim - 3, 3)
+	elif _abs_v < 2:
+		_format = "%%.%df" % min(len_lim - 4, 2)
+	#elif _abs_v < 10:
+	#	_format = "%%.%df" % min(len_lim - 5, 2)
+	elif _abs_v < 100:
+		_format = "%%.%df" % min(len_lim - 5, 1)
+	else:
+		return "%d" % v
+	return _format % v
+	
 
-# ####################
-print "\n\nTargets:"
-pattern_title = "    {:<25}{}"
-pattern_data = "    {:<25}{:<.3f}"
-print pattern_title.format("", "output/min")
-for item, rate in final_products:
-	print pattern_data.format(item, rate)
+class ExportableProductionTree(facc.ProductionTree):
+	def to_tabular(self, file: io.IOBase or str, *ka, **kw) -> None:
+		if isinstance(file, str):
+			with open(file, "w") as fh:
+				self.to_tabular(fh, *ka, **kw)
+			return
+		elif isinstance(file, io.IOBase):
+			self.to_tabular_handler(file, *ka, **kw)
+			return
+		raise TypeError("'file' must be either 'str' or valid file handle")
+		return
 
-# ####################
-print "\n\nIngredient(s):"
-pattern_title = "    {:<32}{:<12}{:<12}{:<25}{}"
-pattern_data = "    {:<32}{:<12.1f}{:<12.1f}{:<25}{:<.0f}"
-print pattern_title.format("", "trans/min", "exec/min", "builder", "units")
-for item in sorted(ingredients.keys()):
-	rate = ingredients[item]
-	if not (item in all_recipes):
-		continue
-	recipe = all_recipes[item]
-	builder = category_builder[recipe["category"]]
-	exec_rate = rate / recipe["result_count"]
-	print pattern_data.format(item, rate, exec_rate, builder["builder"], math.ceil(exec_rate * recipe["craft_time"] / builder["speed_factor"] / 60))
 
-# ####################
-print "\n\nUranium process(es): (BETA)"
-pattern_title = "    {:<32}{:<11}{:<25}{}"
-pattern_data = "    {:<32}{:<11.1f}{:<25}{:<.0f}"
-pattern_waste = "    {:<32}{:<11.2f}{:<25}"
-print pattern_title.format("", "exec/min", "builder", "units")
-if (uranium_process_execs[0] > 0.000):
-	print pattern_data.format("uranium-processing", uranium_process_execs[0], "centrifuge", math.ceil(uranium_process_execs[0] * 10.0 / 0.75 / 60))
-if (uranium_process_execs[1] > 0.000):
-	print pattern_data.format("kovarex-enrichment-process", uranium_process_execs[1], "centrifuge", math.ceil(uranium_process_execs[1] * 50.0 / 0.75 / 60))
-if (uranium_process_execs[2] > 0.000):
-	print pattern_data.format("nuclear-fuel-reprocessing", uranium_process_execs[2], "centrifuge", math.ceil(uranium_process_execs[2] * 50.0 / 0.75 / 60))
-if (uranium_process_execs[3] > 0.000):
-	print pattern_waste.format("u-235-waste", uranium_process_execs[3], "residue-waste")
-
-# ####################
-print "\n\nOil process(es):"
-pattern_title = "    {:<32}{:<11}{:<25}{}"
-pattern_data = "    {:<32}{:<11.1f}{:<25}{:<.0f}"
-pattern_waste = "    {:<32}{:<11.1f}{:<25}"
-print pattern_title.format("", "exec/min", "builder", "units")
-for index, process in enumerate(oil_processes):
-	exec_rate = oil_process_execs[index]
-	if exec_rate > 0.000:
-		if (process[-5:] != "waste"):
-			recipe = odd_recipe[process]
-			builder = category_builder[recipe["category"]]
-			print pattern_data.format(process, exec_rate, builder["builder"], math.ceil(exec_rate * recipe["craft_time"] / builder["speed_factor"] / 60))
+	def to_tabular_handler(self, fh, time_unit = "min", header = "") -> None:
+		category_cfg = FACTORIO.RECIPE_CATEGORIES
+		crafter_cfg = FACTORIO.CRAFTERS
+		targ, rexe, raw, wst = self.get_current_tree()
+		cons, prod = self.get_item_summary()
+		########################################################################
+		# header
+		if header:
+			print(header, file = fh)
+			print("", file = fh)
+		########################################################################
+		# targets
+		dataline_fmt = "{:>3}. {:<35}{:>20}"
+		print("I. TARGETS > %d total" % len(targ), file = fh)
+		print("_" * 60, file = fh)
+		if not rexe:
+			print(dataline_fmt.format(0, "[empty]", "-"), file = fh)
 		else:
-			print pattern_waste.format(process, exec_rate, "residue-waste")
+			for i, k in enumerate(sorted(targ.keys())):
+				print(dataline_fmt.format(i + 1, k,\
+					_fmt_float(targ[k]) + " /" + time_unit), file = fh)
+		print("", file = fh)
+		########################################################################
+		# recipe exec
+		_exu_w = 31
+		_exu_totw = _exu_w * 3 + 6
+		_exu_fmt = "{:<%d} {:>%d}" % (_exu_w - 10, 9)
+		headline_fmt = (("_" * 40) + "_{:_>12} {:_>12} ____{:_^%d}") % _exu_totw
+		dataline_fmt = ("{:>3}. {:<35} {: >12} {: >12}   | {: <%d}") % _exu_totw
+		print("II. RECIPES INFO > %d total" % len(rexe), file = fh)
+		headline = headline_fmt\
+			.format(" exec/%s" % time_unit, " std.units", " unit [load] ")
+		print("_" * len(headline), file = fh)
+		print(headline, file = fh)
+		if not rexe:
+			print(dataline_fmt.format(0, "[empty]", *("-") * 3), file = fh)
+		else:
+			for i, k in enumerate(sorted(rexe.keys())):
+				_recp = self.get_recipe(k)
+				_exe = rexe[k]
+				_std = _exe * _recp.craft_time / TIME_TO_SEC[time_unit]
+				# each field format is defined above
+				_exu = [_exu_fmt.format(c[:_exu_w - 9], "[%s]"\
+						% _fmt_float(_std / crafter_cfg[c]["speed"])\
+					) for c in category_cfg[_recp.category]]
+				_exu = " | ".join([("{:^%d}" % _exu_w).format(i) for i in _exu])
+				print(dataline_fmt.format(i + 1, k, _fmt_float(_exe, 12, True),\
+					_fmt_float(_std, 12, True), _exu), file = fh)
+		print("", file = fh)
+		########################################################################
+		# item consumption/production/wasting
+		headline_fmt = ("_" * 40) + "_{:_>13} {:_>13} {:_>13}"
+		dataline_fmt = "{:>3}. {:<35} {: >13} {: >13} {: >13}"
+		for _title, _data in [
+				("III. RAW MATERIAL INPUT", raw),
+				("IV. ITEM CONSUMPTION", cons),
+				("V. ITEM PRODUCTION", prod),
+				("VI. ITEM WASTING", wst),
+			]:
+			print("%s INFO > %d total" % (_title, len(_data)), file = fh)
+			headline = headline_fmt\
+				.format(*[" ~/%s" % u for u in TIME_UNITS])
+			print("_" * len(headline), file = fh)
+			print(headline, file = fh)
+			if not _data:
+				print(dataline_fmt.format(0, "[empty]", *("-") * 3), file = fh)
+			else:
+				sorted_descend = sorted(_data.items(),\
+					key = lambda x: x[1], reverse = True)
+				for i, (k, c) in enumerate(sorted_descend):
+					r = c / TIME_TO_SEC[time_unit] # per second
+					print(dataline_fmt.format(i + 1, k,\
+						*[_fmt_float(r * TIME_TO_SEC[u], 13)
+							for u in TIME_UNITS]),
+						file = fh)
+			print("", file = fh)
+		return
 
-# ####################
-print "\n\nRaw material(s):"
-pattern_title = "    {:<32}{}"
-pattern_data = "    {:<32}{:<.1f}"
-print pattern_title.format("", "input/min")
-for item in sorted(raw_materials.keys()):
-	print pattern_data.format(item, raw_materials[item])
+
+################################################################################
+if __name__ == "__main__":
+	main()
