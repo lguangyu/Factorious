@@ -6,51 +6,17 @@ import numpy as _numpy_m_
 import scipy as _scipy_m_
 import scipy.optimize
 del scipy # remove from name space, go with _scipy_m_
-from . import recipe_set as _recipe_set_m_
+#from . import recipe_set as _recipe_set_m_
+from . import linear_optimizer_base as _linear_optimizer_base_m_
 
 
-class OptimizationInfeasibleError(RuntimeError):
-	pass
-
-
-@_recipe_set_m_.RecipeSetEmbed()
-class LinearOptimizer(object):
-	def __init__(self,
-			recipe_set: _recipe_set_m_.RecipeSet,
-			copy: bool = False,
-			force_net: bool = False,
-		) -> None:
-		"""
-		linear optimizer over a set of recipes;
-
-		PARAMETERS
-		----------
-		recipe_set:
-			Recipes dataset for optimization calculation;
-
-		copy:
-			if True, RecipeSet is copied locally;
-			if False, RecipeSet is not copied but a verify() check is enforced;
-
-		force_net:
-			enforce all Recipes are net; if False, keep unchanged; if True, a
-			local copy of Recipes are enforced (i.e. overrides <copy>);
-			see Recipe.copy() for more information;
-
-		EXCEPTIONS
-		----------
-		TypeError: if recipe_set is not of type RecipeSet;
-		"""
-		# see ProductionTree for info of this commenting out
-		super(self._wrapped_class_original_, self).__init__()
-		if not isinstance(recipe_set, _recipe_set_m_.RecipeSet):
-			raise TypeError("'recipe_set' must be of type 'RecipeSet'")
-		# override copy if force_net is set
-		if force_net or copy:
-			self.set_recipe_set(recipe_set.copy(force_net))
-		else:
-			self.set_recipe_set(recipe_set)
-			self.get_recipe_set().verify()
+class MultifurcationOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
+	"""
+	optimizer for Items has multiple source recipes, or recipes has multiple
+	products ran into multifurcations;
+	"""
+	def __init__(self, *ka, **kw) -> None:
+		super(MultifurcationOptimizer, self).__init__(*ka, **kw)
 		return
 
 
@@ -85,19 +51,18 @@ class LinearOptimizer(object):
 		tol:
 			float comparison tolerance;
 
-		RETURNS
+		RETUNRS
 		-------
-		recp_exec (dict in signature "recipe": execs):
+		recipe_execs (dict in signature "recipe": execs):
 			Recipe executions optimized by minimize sum of all raw inputs;
 
-		raw (dict in signature "item": count):
+		raw_inputs (dict in signature "item": count):
 			summary of raw input Items;
 
-		wasting (dict in signature "item": count):
+		wastings (dict in signature "item": count):
 			summary of wasted items; wasting is innevitable in some cases when
 			intermediates/side products cannot be balanced;
 		"""
-		# TODO:  break this function into two more easily testable ones
 		# pre screening
 		# remove zeros
 		local_prods = optim_goals.copy()
@@ -118,10 +83,11 @@ class LinearOptimizer(object):
 		while True:
 			# prepare
 			recipe_names, recipe_ids, item_names, item_ids, coef_matrix\
-				= self._get_optimizing_coef_matrix(local_prods.keys())
+				= self.get_optimizing_coef_matrix(local_prods.keys())
 			A_T = coef_matrix.T
 			# inputs for linear programming
-			c, A_eq, b_eq, A_ub, b_ub, x_bounds, c_ids, eq_ids, ub_ids\
+			c, A_eq, b_eq, A_ub, b_ub, rA_ub, rb_ub, x_bounds,\
+				c_ids, eq_ids, ub_ids\
 				= self._prepare_linear_programming(
 					optim_goals = local_prods,
 					ignore_trivial = ignore_trivial,
@@ -133,10 +99,24 @@ class LinearOptimizer(object):
 					A_T = A_T)
 			# linear programming
 			res = _scipy_m_.optimize.linprog(c,
-				A_ub = A_ub, b_ub = b_ub,
+				A_ub = rA_ub, b_ub = rb_ub,
 				A_eq = A_eq, b_eq = b_eq,
 				bounds = x_bounds, method = "simplex",
 				options = {"maxiter": max_iter, "tol": tol})
+			print("c_ids", c_ids, [item_names[i] for i in c_ids])
+			print("eq_ids", eq_ids, [item_names[i] for i in eq_ids])
+			print("ub_ids", ub_ids, [item_names[i] for i in ub_ids])
+			print("--")
+			print("c", c)
+			print(A_T)
+			print("in", item_names)
+			print("rn", recipe_names)
+			print("A_eq", A_eq)
+			print("b_ub", b_ub)
+			print("xb", x_bounds)
+			print("x", res.x)
+			print("yield", _numpy_m_.dot(A_T, res.x.reshape(-1, 1)))
+			#print(res.x)
 			# check results
 			if res.status == 0:
 				break
@@ -145,12 +125,15 @@ class LinearOptimizer(object):
 					max_iter = max_iter * 10
 					continue
 				else:
-					raise OptimizationInfeasibleError(res.message)
+					raise _linear_optimizer_base_m_.\
+						OptimizationInfeasibleError(res.message)
 			elif res.status == 2:
 				# TODO: any solutions when infeasible?
-				raise OptimizationInfeasibleError(res.message)
+				raise _linear_optimizer_base_m_.\
+					OptimizationInfeasibleError(res.message)
 			else:
-				raise OptimizationInfeasibleError(res.message)
+				raise _linear_optimizer_base_m_.\
+					OptimizationInfeasibleError(res.message)
 		# summary
 		# recipe execs
 		for k, v in zip(recipe_names, res.x):
@@ -165,58 +148,6 @@ class LinearOptimizer(object):
 			if not _numpy_m_.isclose(y_prod[i], 0):
 				waste.update({item_names[i]: y_prod[i]})
 		return rexe, rawin, waste
-
-
-	def _get_optimizing_coef_matrix(self,
-			items: _collections_m_.Iterable,
-		) -> (list, list, list, list, _numpy_m_.ndarray):
-		"""
-		(internal only) slice a smaller coefficient matrix from that in original
-		RecipeSet, yet still contains all related Recipes/Items; this helps
-		reduce the equations set during optimization;
-
-		PARAMETERS
-		----------
-		items:
-			Item names, iterable;
-
-		RETURNS
-		-------
-		recipe_names (list):
-			sorted Recipe names corresponding to recipe_ids;
-
-		recipe_ids (list):
-			sliced Recipe indices compatible with bound RecipeSet.recipe_encoder;
-
-		item_names (list):
-			sorted Item names corresponding to item_ids;
-
-		item_ids (list):
-			sliced Item indices compatible with bound RecipeSet.item_encoder;
-
-		coef_matrix (numpy.ndarray):
-			sliced matrix;
-		"""
-		# input as a list of Items
-		# first, retrieve all related recipes of this Item
-		all_recipes = _collections_m_.ChainMap(\
-			*[self.fetch_recipe_dependency(i, "up") for i in items])
-		# second, recipes
-		#   1. get names
-		recipe_names = list(all_recipes.keys())
-		recipe_names.sort() # sort is optional
-		#   2. encode into ids
-		recipe_ids = self.get_recipe_encoder().encode(recipe_names)
-		# third, items
-		#   1. get names
-		item_names = list(self.extract_all_items(all_recipes.values()))
-		item_names.sort() # sort is optional
-		#   2. encode into ids
-		item_ids = self.get_item_encoder().encode(list(item_names))
-		# slice matrix
-		mesh = _numpy_m_.ix_(recipe_ids, item_ids)
-		coef_matrix = self.get_recipe_set().get_coef_matrix()[mesh]
-		return recipe_names, recipe_ids, item_names, item_ids, coef_matrix
 
 
 	def _prepare_linear_programming(self, *,
@@ -254,15 +185,17 @@ class LinearOptimizer(object):
 		c_ids = _numpy_m_.nonzero(list(cond))[0]
 		#assert 
 		# coef, a.k.a. weight of each input
+		print(scales)
 		def lookup_coef(cid):
 			w = scales.get(item_names[cid], None)
 			if w is not None:
 				return w
 			if (not ignore_trivial)\
-				and (self.get_item(item_names[cid]).is_trivial):
+				and (self.get_item(item_names[cid]).is_trivial()):
 				return 0.0
 			return 1.0
 		c_coef = _numpy_m_.asarray(list(map(lookup_coef, c_ids)), dtype = float)
+		print("c_coef", c_coef)
 		assert c_coef.shape == (len(c_ids), ), c_coef.shape
 		# combine multiple inputs
 		c = _numpy_m_.dot(c_coef, A_T[c_ids, :])
@@ -282,27 +215,13 @@ class LinearOptimizer(object):
 		# here we need 0's as 'lower bound'
 		# inverse A_ub again to make this happed
 		A_ub = -A_T[ub_ids, :]
+		# now final step for ub, also include c_ids lines into ub
+		# since those lines and ub have different signs, they are processed
+		# separately above
+		rA_ub = _numpy_m_.vstack([A_T[c_ids, :], A_ub])
+		rb_ub = _numpy_m_.zeros(len(c_ids) + len(ub_ids), dtype = float)
+		# NOTE: keep b_ids not changed
 		# linear programming
 		x_bounds = [(0, None)] * n_recipes
-		#print(c_ids, [item_names[i] for i in c_ids])
-		#print(eq_ids, [item_names[i] for i in eq_ids])
-		#print(ub_ids, [item_names[i] for i in ub_ids])
-		#print("--")
-		#print(A_T)
-		#print(item_names)
-		#print(recipe_names)
-		#print(A_eq)
-		#print(b_ub)
-		#print(x_bounds)
-		return c, A_eq, b_eq, A_ub, b_ub, x_bounds, c_ids, eq_ids, ub_ids
-
-
-	@staticmethod
-	def extract_all_items(recipes: list) -> None:
-		"""
-		return the set of all involved Items given a list of Recipes
-		"""
-		ret = set()
-		for r in recipes:
-			ret.update(r.inputs.keys(), r.products.keys())
-		return ret
+		return c, A_eq, b_eq, A_ub, b_ub, rA_ub, rb_ub, x_bounds,\
+			c_ids, eq_ids, ub_ids

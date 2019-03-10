@@ -5,6 +5,7 @@ import collections as _collections_m_
 
 class _FactorioTunes(object):
 	# namespace use
+	# an attribute-index safe
 	def __init__(self, *ka, **kw):
 		super(_FactorioTunes, self).__init__()
 		return
@@ -87,7 +88,7 @@ class FactorioTunes015(_FactorioTunes):
 		# fluids
 		self.FLUIDS = [
 			"crude-oil",
-			"heavy-old",
+			"heavy-oil",
 			"light-oil",
 			"lubricant",
 			"petroleum-gas",
@@ -123,9 +124,20 @@ class FactorioTunes015(_FactorioTunes):
 		# example is "heavy-oil" when disabling basic and advanced oil processings
 		# then since coal liquefaction is the only recipe, it is non-ambiguous;
 		# but balancing the side products of it is toxic
-		self.ENFORCE_OPTIMIZE = [
-			"heavy-oil",
-		]
+		#
+		# 2019-03-09 update:
+		# CURRENTLY DEPRECATED
+		# now all products of a multi-product recipe are forced to going through
+		# optimizer, obviously including heavy-oil
+		#self.ENFORCE_OPTIMIZE = [
+		#	"heavy-oil",
+		#]
+
+		# accompany this item in optimization process
+		# if force the 
+		self.ITEM_ACCOMPANY = {
+			"uranium-fuel-cell": {"used-up-uranium-fuel-cell": 1},
+		}
 		return
 
 

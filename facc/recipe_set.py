@@ -92,13 +92,15 @@ class RecipeSet(object):
 		return
 
 
-	def _link_recipes(self) -> None:
+	def _setup_recipe_item_search_cache(self) -> None:
 		"""
-		(internal only) link recipes in (3) ways:
-		0) summarize item collection appear in all recipes;
-		1) recipes products -> item collection;
-		2) item collection -> recipe inputs;
-		3) recipe -> recipe down/upstream dependencies;
+		(internal only) setup search database between Recipe/Item queries;
+		in (4) ways:
+		0) summarize Item collection appear in all Recipes;
+		1) Recipes products -> Item collection;
+		2) Item collection -> Recipe inputs;
+		3) Recipe -> Recipe down/upstream dependencies;
+		4) Item flags;
 
 		results are stored in:
 		self._items
@@ -110,22 +112,22 @@ class RecipeSet(object):
 		self._recipe_dwstr.clear()
 		# goal 0, 1, 2
 		for recp in self._recipes.values():
-			# force products of multi-product recipes to be optimized
-			is_multiprod_recipe = len(recp.products) >= 2
 			# put recipe name to the correct input_of/product_of list
 			# based on the recipe inputs/products
 			for i in recp.inputs.keys():
 				self.get_item(i).input_of.add(recp.name)
 			for i in recp.products.keys():
 				self.get_item(i).product_of.add(recp.name)
-				if is_multiprod_recipe:
-					# NOTE: do NOT do i.need_optimize = is_multiprod_recipe
-					self.get_item(i).need_optimize = True
-		# goal 3
+		# goal 3, 4
+		# link recipe upstream/downstream using Item
+		# update Item product_of_complex_recipe flag
 		for i in self._items.values():
 			for _dw, _up in _itertools_m_.product(i.input_of, i.product_of):
 				self._recipe_upstr.setdefault(_dw, set()).add(_up)
 				self._recipe_dwstr.setdefault(_up, set()).add(_dw)
+			i.set_product_of_complex_recipe(
+				any([(len(self.get_recipe(r).products) >= 2)\
+					for r in i.product_of]))
 		# for correctness, clear these data
 		# since these are calculated upon linkages
 		self._graph = None
@@ -141,7 +143,7 @@ class RecipeSet(object):
 		# rescue trivial flags since self._items will be refreshed
 		trivials = self.get_trivials()
 		# refresh
-		self._link_recipes()
+		self._setup_recipe_item_search_cache()
 		self.recipe_encoder.train(self._recipes.keys())
 		self.item_encoder.train(self._items.keys())
 		# lazy load now
@@ -219,12 +221,33 @@ class RecipeSet(object):
 		return item_name in self._items
 
 
+	def force_raws(self,
+			item_names: list,
+			force_raw: bool = True,
+		) -> None:
+		"""
+		mark a given list of Items with flag <force_raw>;
+
+		PARAMETERS
+		----------
+		item_names:
+			list of Item names;
+
+		force_raw:
+			if True, these Items are marked as raw input; unlike <trivial> flag,
+			<force_raw> Items are still optimized;
+		"""
+		for i in item_names:
+			self.get_item(i).set_forced_raw(force_raw)
+		return
+
+
 	def set_trivials(self,
 			item_names: list,
 			is_trivial: bool = True,
 		) -> None:
 		"""
-		mark a given Item to be with flag <is_trivial>;
+		mark a given list of Items with flag <trivial>;
 
 		PARAMETERS
 		----------
@@ -232,10 +255,11 @@ class RecipeSet(object):
 			list of Item names;
 
 		is_trivial:
-			if True, these Items are marked as raw input;
+			if True, these Items are marked as raw input and will be disabled
+			from input optimization;
 		"""
 		for i in item_names:
-			self.get_item(i).is_trivial = is_trivial
+			self.get_item(i).set_trivial(is_trivial)
 		return
 
 
@@ -247,7 +271,7 @@ class RecipeSet(object):
 		-------
 		list of Item names
 		"""
-		return [i.name for i in self._items.values() if i.is_trivial]
+		return [i.name for i in self._items.values() if i.is_trivial()]
 
 
 	def remova_all_trivial_flags(self) -> None:
@@ -255,13 +279,13 @@ class RecipeSet(object):
 		set all Items' <is_trivial> flag to be False;
 		"""
 		for i in self._items.values():
-			i.is_trivial = False
+			i.set_trivial(False)
 		return
 
 
 	def verify(self) -> None:
 		"""
-		verify if Recipe and Items linkage is complete and correct;
+		verify if Recipe/Items search db is complete and correct;
 
 		EXCEPTIONS
 		----------
@@ -445,17 +469,6 @@ class RecipeSetEmbed(object):
 
 			def iterate_items(self, *ka, **kw) -> iter:
 				return self._rset_emb_recipe_set.iterate_items(*ka, **kw)
-
-			def set_trivials(self, *ka, **kw) -> None:
-				self._rset_emb_recipe_set.set_trivials(*ka, **kw)
-				return
-
-			def get_trivials(self, *ka, **kw) -> list:
-				return self._rset_emb_recipe_set.get_trivials(*ka, **kw)
-
-			def remova_all_trivial_flags(self, *ka, **kw) -> None:
-				self._rset_emb_recipe_set.remova_all_trivial_flags(*ka, **kw)
-				return
 
 			def fetch_recipe_dependency(self, *ka, **kw) -> dict:
 				return self._rset_emb_recipe_set.fetch_recipe_dependency(*ka, **kw)
