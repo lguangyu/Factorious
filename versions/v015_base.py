@@ -8,6 +8,7 @@ class FactorioTunesDB_v015(stub.FactorioTunesBase):
 	def __init__(self, *ka, **kw):
 		super(FactorioTunesDB_v015, self).__init__(*ka, **kw)
 		self.RECIPE_JSON = "./versions/recipe.0.15.base.json"
+		self.DEFAULT_YIELD_LEVEL = "normal"
 
 		# crafter settings
 		self.CRAFTERS = {
@@ -64,13 +65,15 @@ class FactorioTunesDB_v015(stub.FactorioTunesBase):
 		}
 
 		# create a "category": ["crafter"] dict
-		self.RECIPE_CATEGORIES = collections.defaultdict(list)
+		_categories = collections.defaultdict(list)
 		for k, v in self.CRAFTERS.items():
 			for t in v["recipe_type"]:
-				self.RECIPE_CATEGORIES[t].append(k)
-		for v in self.RECIPE_CATEGORIES.values():
+				_categories[t].append(k)
+		for v in _categories.values():
 			v.sort(key = lambda x: self.CRAFTERS[x].get("repr", x),\
 				reverse = True)
+		# return to dict, make sure to raise KeyError when invalid query made
+		self.RECIPE_CATEGORIES = dict(_categories)
 
 		# commonly-known as trivials
 		self.COMMON_TRIVIALS = [
@@ -78,7 +81,7 @@ class FactorioTunesDB_v015(stub.FactorioTunesBase):
 			"water",
 		]
 		# concatenated
-		self.COMMON_TRIVIALS_STR = ",".join(self.COMMON_TRIVIALS)
+		#self.COMMON_TRIVIALS_STR = ",".join(self.COMMON_TRIVIALS)
 
 		# fluids
 		self.FLUIDS = [
@@ -130,7 +133,8 @@ class FactorioTunesDB_v015(stub.FactorioTunesBase):
 
 		# accompany this item in optimization process
 		# if force the 
-		self.ITEM_ACCOMPANY = {
-			"uranium-fuel-cell": {"used-up-uranium-fuel-cell": 1},
-		}
+		# CURRENTLY DEPRECATED
+		#self.ITEM_ACCOMPANY = {
+		#	"uranium-fuel-cell": {"used-up-uranium-fuel-cell": 1},
+		#}
 		return

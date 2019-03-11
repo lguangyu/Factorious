@@ -24,16 +24,76 @@ TIME_TO_SEC = {
 
 ################################################################################
 # argument parse
-def get_args():
-	# get version first
-	ap_ver = argparse.ArgumentParser(add_help = False)
-	ap_ver.add_argument("-v", "--factorio-version", type = str,\
-		default = versions.default)
-	ver, other_args = ap_ver.parse_known_args()
-	FACTORIO = versions.get(ver.factorio_version)
+def _stage_argparse_get_factorio_version(argv, namespace):
+	# construction of main argument parser needs this information
+	# local subparser
+	ap = argparse.ArgumentParser(add_help = False)
+	ag = ap.add_argument_group("database selection")
+	ag.add_argument("-v", "--factorio-version", type = str, metavar = "ver",
+		default = versions.default,
+		help = "use recipe database version (default: %s)" % versions.default)
+	# get args
+	_, unparsed = ap.parse_known_args(argv, namespace)
+	namespace.FACTORIO = versions.get(namespace.factorio_version)
+	return ap, unparsed
 
+
+def _stage_argparse_list_actions(argv, namespace):
+	# if --list-items and --list-recipes are set
+	# these should be executed immediately regardless of errors in other args
+	# local subparser
+	ap = argparse.ArgumentParser(add_help = False)
+	ag = ap.add_argument_group("viewing actions")
+	ag.add_argument("--list-items", action = "store_true",
+		help = "list all items in specified database and exit")
+	ag.add_argument("--list-recipes", action = "store_true",
+		help = "list all recipes in specified database and exit")
+	# get args
+	_, unparsed = ap.parse_known_args(argv, namespace)
+	if namespace.list_items or namespace.list_recipes:
+		print_items_and_recipes(namespace)
+		ap.exit(0)
+	return ap, unparsed
+	
+
+# viewing
+def print_items_and_recipes(_args) -> None:
+	recp_list = load_raw_recipes(_args.FACTORIO.RECIPE_JSON)
+	recipe_set = get_recipe_set(recp_list,
+		yield_level = _args.FACTORIO.DEFAULT_YIELD_LEVEL)
+	fh = sys.stdout
+	for _do, _header, _iter in [
+			(_args.list_items, "ITEMS >> %s", recipe_set.iterate_items()),
+			(_args.list_recipes, "RECIPES >> %s", recipe_set.iterate_recipes()),
+		]:
+		if _do:
+			h = _header % _args.FACTORIO.RECIPE_JSON
+			print("_" * len(h), file = fh)
+			print(h, file = fh)
+			for i in sorted(_iter):
+				print(i, file = fh)
+	return
+
+
+
+def get_args():
+	# cumulatively parse args in stages
+	ns = argparse.Namespace()
+	unparsed = sys.argv[1:]
+	############################################################################
+	# first get factorio version selection
+	_ver_parser, unparsed\
+		= _stage_argparse_get_factorio_version(unparsed, ns)
+	############################################################################
+	# used if --list-items or --list-recipes are set
+	# this action happens before the main argument parse
+	# and should be ignore parsing errors unique to the full parsing
+	_list_act_parser, unparsed\
+		= _stage_argparse_list_actions(unparsed, ns)
+	############################################################################
 	# the full argument parser
-	ap = argparse.ArgumentParser()
+	# note args already has something in it
+	ap = argparse.ArgumentParser(parents = [_ver_parser, _list_act_parser])
 	ap.add_argument("targets", type = str,
 		help = "production targets for calculation, in <item,rate> format for\
 			each target, separated by plus (+) between targets; for example,\
@@ -41,13 +101,6 @@ def get_args():
 			set to -, assuming in CSV format (each line being a target)")
 	#
 	ag = ap.add_argument_group("basic options")
-	ag.add_argument("-v", "--factorio-version", type = str, metavar = "ver",
-		default = versions.default,
-		help = "use recipe database version (default: %s)" % versions.default)
-	ag.add_argument("--list-items", action = "store_true",
-		help = "list all items (in file specified by -r) and exit")
-	ag.add_argument("--list-recipes", action = "store_true",
-		help = "list all recipes (in file specified by -r) and exit")
 	ag.add_argument("-y", "--yield-level", type = str,
 		choices = ["normal", "expensive"], default = "normal",
 		help = "yield difficulty level (default: normal)")
@@ -76,41 +129,22 @@ def get_args():
 			trivial in addition to the default list [%s] (if used); trivial\
 			material has all properties of raw material, and additionally are\
 			excluded from optimization on consumption (default: <empty>)"\
-			% FACTORIO.COMMON_TRIVIALS_STR)
+			% (",".join(ns.FACTORIO.COMMON_TRIVIALS)))
 	ag.add_argument("--no-default-trivial", action = "store_true",
-		help = "do not use the defauly trivial items list [%s] (default: off)"\
-			% FACTORIO.COMMON_TRIVIALS_STR)
+		help = "do not use the default trivial items list [%s] (default: off)"\
+			% (",".join(ns.FACTORIO.COMMON_TRIVIALS)))
 	ag = ap.add_argument_group("optimization options")
 	ag.add_argument("--tolerance", type = float,
 		metavar = "float", default = 1e-6,
 		help = "float comparison tolerance used in optimization (default: 1e-6)")
-
-	############################################################################
-	# used if --list-items or --list-recipes are set
-	# this action happens before the main argument parse
-	# and should be ignore parsing errors unique to the full parsing
-	ap_list = argparse.ArgumentParser(add_help = False)
-	ap_list.add_argument("--list-items", action = "store_true")
-	ap_list.add_argument("--list-recipes", action = "store_true")
-	ap_list.add_argument("--yield-level", type = str, default = "normal")
-	# if recipe is not set, go to the full parsing
-	# that will take care of error throwing
-	args, unkowns = ap_list.parse_known_args()
-	args.FACTORIO = FACTORIO
-	if args.list_items or args.list_recipes:
-		print_items_and_recipes(args)
-		ap_list.exit(0)
 	# full parsing
-	args = ap.parse_args()
-	# put FACTORIO  to the name space
-	args.FACTORIO = FACTORIO
+	ap.parse_args(unparsed, ns)
 	# refine args
-	args.refined_targets = argsrefine_parse_targets(args)
-	args.refined_excluded_recipes = argsrefine_excluded_recipes(args)
-	args.refined_trivials = argsrefine_trivials(args,\
-		default = FACTORIO.COMMON_TRIVIALS_STR)
-	args.refined_raws = argsrefine_manual_raws(args)
-	return args
+	ns.refined_targets = argsrefine_parse_targets(ns)
+	ns.refined_excluded_recipes = argsrefine_excluded_recipes(ns)
+	ns.refined_trivials = argsrefine_trivials(ns)
+	ns.refined_raws = argsrefine_manual_raws(ns)
+	return ns
 
 
 ################################################################################
@@ -140,33 +174,15 @@ def argsrefine_excluded_recipes(_args) -> list:
 	return ret
 
 
-def argsrefine_trivials(_args, default = "") -> list:
+def argsrefine_trivials(_args) -> list:
 	trivials = _args.append_trivial.split(",")
 	if not _args.no_default_trivial:
-		trivials += default.split(",")
-	return trivials
+		trivials += _args.FACTORIO.COMMON_TRIVIALS
+	return list(set(trivials)) # remove duplicates
 
 
 def argsrefine_manual_raws(_args) -> list:
 	return _args.raw_material.split(",")
-
-
-################################################################################
-# viewing
-def print_items_and_recipes(_args) -> None:
-	recp_list = load_raw_recipes(_args.FACTORIO.RECIPE_JSON)
-	recipe_set = get_recipe_set(recp_list,
-		yield_level = _args.yield_level)
-	for _flag, _header, _iter in [
-			(_args.list_items, "ITEMS >> %s", recipe_set.iterate_items()),
-			(_args.list_recipes, "RECIPES >> %s", recipe_set.iterate_recipes()),
-		]:
-		if _flag:
-			h = _header % _args.FACTORIO.RECIPE_JSON
-			print("_" * len(h), file = sys.stdout)
-			for i in sorted(_iter):
-				print(i, file = sys.stdout)
-	return
 
 
 ################################################################################
@@ -186,7 +202,7 @@ def main():
 	apply_maunal_item_flags(recipe_set,
 		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
 	# towards production calculations
-	prod_tree = ExportableProductionTree(recipe_set)
+	prod_tree = ExportableProductionTree(recipe_set, copy = True)
 	obj_scales = get_optim_obj_scales(args)
 	# do calculation
 	prod_tree.calculate_targets(args.refined_targets,\
@@ -237,7 +253,9 @@ def get_recipe_set(raws, *,
 				craft_time = group["craft_time"])
 			recipes.append(_r)
 	# construct recipe set
-	recipe_set = facc.RecipeSet(recipes, copy = True, net_yield = True)
+	# force net yield to be True
+	#recipe_set = facc.RecipeSet(recipes, copy = True, net_yield = True)
+	recipe_set = facc.RecipeSet(recipes, net_yield = True)
 	return recipe_set
 
 
@@ -245,8 +263,10 @@ def apply_maunal_item_flags(recipe_set,
 		raw_items = [],
 		trivial_items = [],
 	) -> None:
-	recipe_set.set_items_flag(raw_items, lambda x: x.setflag_forced_raw(True))
-	recipe_set.set_items_flag(trivial_items, lambda x: x.setflag_trivial(True))
+	recipe_set.set_items_flag(raw_items,\
+		action = lambda x: x.setflag_forced_raw(True))
+	recipe_set.set_items_flag(trivial_items,
+		action = lambda x: x.setflag_trivial(True))
 	return
 
 
