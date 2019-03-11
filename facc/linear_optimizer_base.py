@@ -2,10 +2,15 @@
 
 import collections as _collections_m_
 import numpy as _numpy_m_
+from . import abc as _abc_m_
 from . import recipe_set as _recipe_set_m_
 
 
 class OptimizationInfeasibleError(RuntimeError):
+	pass
+
+
+class LinearOptimizerAttributeSet(_abc_m_.ProtectedAtrributeHolder):
 	pass
 
 
@@ -77,13 +82,13 @@ class LinearOptimizerBase(object):
 		raise NotImplementedError("not implemented base class method")
 
 
-	def get_optimizing_coef_matrix(self,
+	def fetch_optimization_data(self,
 			items: _collections_m_.Iterable,
-		) -> (list, list, list, list, _numpy_m_.ndarray):
+		) -> LinearOptimizerAttributeSet:
 		"""
-		slice a smaller coefficient matrix from that in original RecipeSet, yet
-		still contains all related Recipes/Items; this helps reduce the
-		equations set during optimization;
+		fetch all Recipes/Items data that are involved in the optimization, by
+		given a list of Item names; also slice the coefficient matrix for only
+		involved Recipes/Items;
 
 		PARAMETERS
 		----------
@@ -92,6 +97,9 @@ class LinearOptimizerBase(object):
 
 		RETURNS
 		-------
+		below values are returned in a single instance of
+		LinearOptimizerAttributeSet() class;
+
 		recipe_names (list):
 			sorted Recipe names corresponding to recipe_ids;
 
@@ -110,7 +118,7 @@ class LinearOptimizerBase(object):
 		# input as a list of Items
 		# first, retrieve all related recipes of this Item
 		all_recipes = _collections_m_.ChainMap(\
-			*[self.fetch_recipe_dependency(i, "up") for i in items])
+			*[self.fetch_recipes_in_dependency(i, "up") for i in items])
 		# second, recipes
 		#   1. get names
 		recipe_names = sorted(all_recipes.keys()) # sort is optional
@@ -126,7 +134,14 @@ class LinearOptimizerBase(object):
 		# slice matrix
 		mesh = _numpy_m_.ix_(recipe_ids, item_ids)
 		coef_matrix = self.get_recipe_set().get_coef_matrix()[mesh]
-		return recipe_names, recipe_ids, item_names, item_ids, coef_matrix
+		# building return values
+		attr_set = LinearOptimizerAttributeSet()
+		attr_set.recipe_names = recipe_names
+		attr_set.recipe_ids = recipe_ids
+		attr_set.item_names = item_names
+		attr_set.item_ids = item_ids
+		attr_set.A_T = coef_matrix.T
+		return attr_set
 
 
 	@staticmethod

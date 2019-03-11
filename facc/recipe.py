@@ -129,7 +129,7 @@ class Recipe(object):
 		-------
 		a new Recipe instance;
 		"""
-		new = type(self)(
+		new = Recipe(
 			inputs = self.inputs,
 			products = self.products,
 			craft_time = self.craft_time,

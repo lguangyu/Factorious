@@ -182,8 +182,8 @@ class RecipeSet(object):
 		"""
 		(internal only) check cyclic group if is valid;
 		the cyclic group is valid only if there is no trivial operation of some
-		recipes, such that all Items are positive;
-		i.e. the group must be "consuming" something, i.e. not perpetual;
+		recipes (i.e. all zeros), such that all Items have non-positive output;
+		i.e. the group must be "consuming" something, or, not perpetual;
 		this can be checked with UNBOUNDED linear programming;
 		"""
 		recipe_list = sorted(recipe_list)
@@ -211,6 +211,7 @@ class RecipeSet(object):
 		# check linear programming
 		res = _scipy_m_.optimize.\
 			linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
+		assert res.status in [0, 2, 3], res
 		if (res.status == 0) and all(_numpy_m_.isclose(res.x, 0)):
 			# good results; the only solution is trivial (all zeros)
 			return True
@@ -220,7 +221,6 @@ class RecipeSet(object):
 		elif res.status == 3:
 			# unbounded is failure
 			return False
-		raise RuntimeError(res)
 		return
 
 
@@ -237,6 +237,7 @@ class RecipeSet(object):
 		# lazy load now
 		#self._graph = self.to_graph()
 		#self._coef_mat = self.to_coef_matrix()
+		# reset rescued manual flags
 		self.set_items_flag(forced_raws, lambda x: x.setflag_forced_raw(True))
 		self.set_items_flag(trivials, lambda x: x.setflag_trivial(True))
 		return
@@ -254,7 +255,7 @@ class RecipeSet(object):
 		"""
 		if net_yield is None:
 			net_yield = self.is_net_yield
-		new = type(self)(self.iterate_recipes(True), net_yield = net_yield)
+		new = RecipeSet(self.iterate_recipes(True), net_yield = net_yield)
 		# copy item manual falgs
 		for query_expr, set_expr in [
 				(lambda x: x.is_forced_raw(), lambda x: x.setflag_forced_raw(True)),
@@ -264,8 +265,8 @@ class RecipeSet(object):
 			new.set_items_flag(item_list, set_expr)
 		assert len(self.item_encoder) != 0
 		assert len(self.recipe_encoder) != 0
-		print(len(self.item_encoder))
-		print(len(self.recipe_encoder))
+		#print(len(self.item_encoder))
+		#print(len(self.recipe_encoder))
 		return new
 
 
@@ -345,7 +346,7 @@ class RecipeSet(object):
 
 	def set_items_flag(self,
 			item_names: list,
-			expr: callable,
+			action: callable,
 		) -> None:
 		"""
 		mark a given list of Items with flag <trivial>;
@@ -355,11 +356,12 @@ class RecipeSet(object):
 		item_names:
 			list of Item names;
 
-		expr:
-			callable with Item as input argument;
+		action:
+			callable action to be applied, must with Item as only input
+			argument;
 		"""
 		for i in item_names:
-			expr(self.get_item(i))
+			action(self.get_item(i))
 		return
 
 
@@ -454,7 +456,7 @@ class RecipeSet(object):
 		return self._coef_mat
 
 
-	def fetch_recipe_dependency(self,
+	def fetch_recipes_in_dependency(self,
 			item_name: str,
 			direction: "up" or "down",
 		) -> dict:
@@ -587,9 +589,11 @@ class RecipeSetEmbed(object):
 			def iterate_items(self, *ka, **kw) -> iter:
 				return self._rset_emb_recipe_set.iterate_items(*ka, **kw)
 
-			def fetch_recipe_dependency(self, *ka, **kw) -> dict:
-				return self._rset_emb_recipe_set.fetch_recipe_dependency(*ka, **kw)
+			def fetch_recipes_in_dependency(self, *ka, **kw) -> dict:
+				return self._rset_emb_recipe_set.\
+					fetch_recipes_in_dependency(*ka, **kw)
 
 			def extract_items_from_recipes(self, *ka, **kw) -> set:
-				return self._rset_emb_recipe_set.extract_items_from_recipes(*ka, **kw)
+				return self._rset_emb_recipe_set.\
+					extract_items_from_recipes(*ka, **kw)
 		return embed_c

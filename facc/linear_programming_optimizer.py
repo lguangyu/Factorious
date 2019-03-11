@@ -6,8 +6,15 @@ import numpy as _numpy_m_
 import scipy as _scipy_m_
 import scipy.optimize
 del scipy # remove from name space, go with _scipy_m_
-#from . import recipe_set as _recipe_set_m_
+from . import abc as _abc_m_
 from . import linear_optimizer_base as _linear_optimizer_base_m_
+
+
+class LinearProgrammingParam(_abc_m_.ProtectedAtrributeHolder):
+	"""
+	attribute holder for linear programming input
+	"""
+	pass
 
 
 class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
@@ -74,150 +81,280 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		# check empty, make explicit
 		if not goals_local:
 			return rexe, rawin, waste
+		########################################################################
 		# prepare
+		param = None
 		max_iter = 1000
+		# these are used when infeasible encountered
+		refined_level = 0
+		# if still infeasible at refine_max_level, raise error
+		refine_max_level = 1
+		########################################################################
+		# fetch data
+		optim_data = self.fetch_optimization_data(goals_local.keys())
+		# update scales
+		scales = self._lookup_scales(optim_data.item_names, ignore_trivial,\
+			user_scales = scales, default = 1.0)
 		while True:
-			# prepare
-			recipe_names, recipe_ids, item_names, item_ids, coef_matrix\
-				= self.get_optimizing_coef_matrix(goals_local.keys())
-			A_T = coef_matrix.T
 			# inputs for linear programming
-			c, A_eq, b_eq, A_ub, b_ub, rA_ub, rb_ub, x_bounds,\
-				c_ids, eq_ids, ub_ids\
-				= self._prepare_linear_programming(
+			# generate param if None
+			if not param:
+				param = self._prepare_linear_programming(
 					optim_goals = goals_local,
 					ignore_trivial = ignore_trivial,
 					scales = scales,
-					recipe_names = recipe_names,
-					recipe_ids = recipe_ids,
-					item_names = item_names,
-					item_ids = item_ids,
-					A_T = A_T)
+					optim_data = optim_data)
 			# linear programming
-			res = _scipy_m_.optimize.linprog(c,
-				A_ub = rA_ub, b_ub = rb_ub,
-				A_eq = A_eq, b_eq = b_eq,
-				bounds = x_bounds, method = "simplex",
+			res = _scipy_m_.optimize.linprog(
+				param.c,
+				A_ub = param.A_cub,
+				b_ub = param.b_cub,
+				A_eq = param.A_eq,
+				b_eq = param.b_eq,
+				bounds = param.x_bounds,
+				method = "simplex",
 				options = {"maxiter": max_iter, "tol": tol})
-			#print("c_ids", c_ids, [item_names[i] for i in c_ids])
-			#print("eq_ids", eq_ids, [item_names[i] for i in eq_ids])
-			#print("ub_ids", ub_ids, [item_names[i] for i in ub_ids])
+			#print("c_ids", param.c_ids)
+			#print([optim_data.item_names[i] for i in param.c_ids])
+			#print("eq_ids", param.eq_ids)
+			#print([optim_data.item_names[i] for i in param.ub_ids])
 			#print("--")
-			#print("c", c)
-			#print(A_T)
-			#print("in", item_names)
-			#print("rn", recipe_names)
-			#print("A_eq", A_eq)
-			#print("b_ub", b_ub)
-			#print("xb", x_bounds)
+			#print("c", param.c)
+			#print(optim_data.A_T)
+			#print("in", optim_data.item_names)
+			#print("rn", optim_data.recipe_names)
+			#print("A_eq", param.A_eq)
+			#print("b_ub", param.b_ub)
+			#print("xb", param.x_bounds)
 			#print("x", res.x)
-			#print("yield", _numpy_m_.dot(A_T, res.x.reshape(-1, 1)))
+			#print("yield", _numpy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)))
 			#print(res.x)
 			# check results
 			if res.status == 0:
+				# success
 				break
 			elif res.status == 1:
+				# hit maxiter
 				if max_iter < 100000:
 					max_iter = max_iter * 10
 					continue
-				else:
-					raise _linear_optimizer_base_m_.\
-						OptimizationInfeasibleError(res.message)
 			elif res.status == 2:
-				# TODO: any solutions when infeasible?
-				raise _linear_optimizer_base_m_.\
-					OptimizationInfeasibleError(res.message)
-			else:
-				raise _linear_optimizer_base_m_.\
-					OptimizationInfeasibleError(res.message)
+				# infeasible
+				# TODO: any redemption when infeasible?
+				# potential one solution here, refine the restrictions
+				#if refined_level < refine_max_level:
+				refine_success, param = self._refine_restrictions(
+					param, current_level = refined_level,
+					optim_goals = goals_local,
+					ignore_trivial = ignore_trivial,
+					scales = scales,
+					optim_data = optim_data)
+				if refine_success:
+					#refined_level = refined_level + 1
+					# use refined parameters for another trial
+					continue
+			# NOTE: if not hit break or continue, will end up here
+			raise _linear_optimizer_base_m_.\
+				OptimizationInfeasibleError(res)
 		# summary
 		# recipe execs
-		for k, v in zip(recipe_names, res.x):
+		for k, v in zip(optim_data.recipe_names, res.x):
 			if not _numpy_m_.isclose(v, 0):
 				rexe.update({k: v})
-		y_prod = _numpy_m_.dot(A_T, res.x.reshape(-1, 1)).squeeze()
+		y_prod = _numpy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)).squeeze()
 		# raw inputs and wastings
-		for i in c_ids:
+		for i in param.c_ids:
 			if not _numpy_m_.isclose(y_prod[i], 0):
-				rawin.update({item_names[i]: -y_prod[i]})
-		for i in ub_ids:
+				rawin.update({optim_data.item_names[i]: -y_prod[i]})
+		for i in param.ub_ids:
 			if not _numpy_m_.isclose(y_prod[i], 0):
-				waste.update({item_names[i]: y_prod[i]})
+				waste.update({optim_data.item_names[i]: y_prod[i]})
 		return rexe, rawin, waste
 
 
-	def _prepare_linear_programming(self, *,
-			optim_goals: dict,
-			ignore_trivial: bool,
-			scales: dict,
-			# below are identical to _get_optimizing_coef_matrix output
-			recipe_names: list,
-			recipe_ids: list,
+	def _lookup_scales(self,
 			item_names: list,
-			item_ids: list,
-			A_T: _numpy_m_.ndarray,
-		) -> "...":
+			ignore_trivial: bool = False,
+			user_scales = {},
+			default = 1.0
+		) -> _collections_m_.defaultdict:
 		"""
-		(internal only) preparing the input vectors/matrices for 'linprog';
-		namely:
-			c, A_eq, b_eq, A_ub, b_ub, x_bounds;
-		also:
+		(internal only) determine the scale coefficient in calculating the
+		vector c;
+
+		PARAMETERS
+		----------
+		item_names:
+			all names of Items should be updated
+
+		ignore_trivial:
+			do not regard trivial flag in items
+
+		user_scales:
+			user definition of scales, overrides all automatic/default values
+
+		default:
+			default value if not specified;
+		"""
+		ret = _collections_m_.defaultdict(lambda : default)
+		for k in item_names:
+			if k in user_scales:
+				ret[k] = user_scales[k]
+			elif (not ignore_trivial) and self.get_item(k).is_trivial():
+				ret[k] = 0.0
+			# no need to deal with other cases
+		return ret
+
+
+	def _prepare_linear_programming(self, **kw) -> LinearProgrammingParam:
+		"""
+		prepare a full set of linear programming parameters
+		"""
+		ids_set = self._split_restrictions_sections(**kw)
+		param = self._finalize_linear_programming_params(*ids_set, **kw)
+		return param
+
+
+	def _split_restrictions_sections(self, *,
+			optim_goals: dict,
+			ignore_trivial: bool = False,
+			scales: dict = _collections_m_.defaultdict,
+			# below are identical to _get_optimizing_coef_matrix output
+			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+		) -> LinearProgrammingParam:
+		"""
+		(internal only) find sections to determine:
 			c_ids, eq_ids, ub_ids;
+		used to finally determine the matrices and objective functions in linear
+		programming;
+
+		this function serves as the 'front end' of _prepare_linear_programming;
 		"""
-		n_recipes = len(recipe_ids)
-		n_items = len(item_ids)
+		_opt = optim_data
+		n_recipes = len(_opt.recipe_ids)
+		n_items = len(_opt.item_ids)
+		# boolean 1-d array to indices array
+		bool2index = lambda x: _numpy_m_.nonzero(x)[0]
 		########################################################################
-		# A_eq, b_eq: these are optim_goals
-		cond = [i in optim_goals for i in item_names]
-		eq_ids = _numpy_m_.nonzero(list(cond))[0]
-		A_eq = A_T[eq_ids]
-		assert A_eq.shape == (len(eq_ids), A_T.shape[1]), A_eq.shape
-		b_eq = map(lambda x: optim_goals[item_names[x]], eq_ids)
-		b_eq = _numpy_m_.asarray(list(b_eq), dtype = float)
-		assert b_eq.shape == (len(eq_ids), )
-		########################################################################
+		# mask each sub matrix by conditions
 		# c: is the raw inputs, including trivial if not ignored
-		cond = [self.get_item(i).is_raw(ignore_trivial) for i in item_names]
-		c_ids = _numpy_m_.nonzero(list(cond))[0]
-		#assert 
-		# coef, a.k.a. weight of each input
-		print(scales)
-		def lookup_coef(cid):
-			w = scales.get(item_names[cid], None)
-			if w is not None:
-				return w
-			if (not ignore_trivial)\
-				and (self.get_item(item_names[cid]).is_trivial()):
-				return 0.0
-			return 1.0
-		c_coef = _numpy_m_.asarray(list(map(lookup_coef, c_ids)), dtype = float)
-		print("c_coef", c_coef)
-		assert c_coef.shape == (len(c_ids), ), c_coef.shape
-		# combine multiple inputs
-		c = _numpy_m_.dot(c_coef, A_T[c_ids, :])
-		assert c.shape == (A_T.shape[1], ), "bad c shape"
-		# 'linprog' only minimizes, however inputs are negative
-		# inverse so let 'linprog' maximize 'postitive' values
-		c = -c
-		########################################################################
+		c_bool = [self.get_item(i).is_raw(ignore_trivial) for i in _opt.item_names]
+		# A_eq, b_eq: these are optim_goals
+		eq_bool = [i in optim_goals for i in _opt.item_names]
 		# A_ub, b_ub
 		# ub_ids = ids not in eq_ids nor in c_ids
-		all_ids = range(n_items)
-		ub_ids = filter(lambda x: (x not in eq_ids) and (x not in c_ids), all_ids)
-		ub_ids = _numpy_m_.asarray(list(ub_ids))
-		assert len(ub_ids) + len(eq_ids) + len(c_ids) == n_items, "bad ub_ids"
+		ub_bool = _numpy_m_.logical_not(_numpy_m_.logical_or(c_bool, eq_bool))
+		########################################################################
+		# then bool to ids
+		# though boolean array can also be used to slice matrix, in the summary
+		# phase after linear programming, we prefer using ids
+		c_ids = bool2index(c_bool)
+		eq_ids = bool2index(eq_bool)
+		ub_ids = bool2index(ub_bool)
+		#print(eq_ids)
+		assert len(c_ids) + len(eq_ids) + len(ub_ids) == n_items,\
+			"c_ids/ub_ids len:" + str([len(c_ids), len(ub_ids)])
+		assert len(eq_ids) == len(optim_goals), "eq_ids shape:" + str(eq_ids.shape)
+		return c_ids, eq_ids, ub_ids
+
+
+	def _finalize_linear_programming_params(self, c_ids, eq_ids, ub_ids, *,
+			optim_goals: dict,
+			ignore_trivial: bool = False,
+			scales: dict = _collections_m_.defaultdict,
+			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+		) -> LinearProgrammingParam:
+		"""
+		(internal only) by given:
+			c_ids, eq_ids, ub_ids;
+		do dirty works to prepare the input vectors/matrices for 'linprog',
+		namely:
+			c, A_eq, b_eq, A_ub, b_ub, x_bounds;
+
+		this function serves as the 'back end' of _prepare_linear_programming;
+		"""
+		_opt = optim_data
+		n_recipes = len(_opt.recipe_ids)
+		n_items = len(_opt.item_ids)
+		########################################################################
+		# then use ids to slice A_T
+		A_c, A_eq, A_ub = self._batch_slice(_opt.A_T, c_ids, eq_ids, ub_ids)
+		A_ub = -A_ub # lower bound (0) -> upper bound (0)
+		assert A_c.shape == (len(c_ids), n_recipes), "A_c shape:" + str(A_c.shape)
+		assert A_eq.shape == (len(eq_ids), n_recipes), "A_eq shape:" + str(A_eq.shape)
+		assert A_ub.shape == (len(ub_ids), n_recipes), "A_ub shape:" + str(A_ub.shape)
+		########################################################################
+		# b_eq and b_ub
+		b_inames = [_opt.item_names[i] for i in eq_ids]
+		b_eq = _numpy_m_.asarray([optim_goals[i] for i in b_inames], dtype = float)
 		b_ub = _numpy_m_.zeros(len(ub_ids), dtype = float)
-		# b_ub are 'upper bound', which value are 0's
-		# here we need 0's as 'lower bound'
-		# inverse A_ub again to make this happed
-		A_ub = -A_T[ub_ids, :]
-		# now final step for ub, also include c_ids lines into ub
-		# since those lines and ub have different signs, they are processed
-		# separately above
-		rA_ub = _numpy_m_.vstack([A_T[c_ids, :], A_ub])
-		rb_ub = _numpy_m_.zeros(len(c_ids) + len(ub_ids), dtype = float)
-		# NOTE: keep b_ids not changed
-		# linear programming
-		x_bounds = [(0, None)] * n_recipes
-		return c, A_eq, b_eq, A_ub, b_ub, rA_ub, rb_ub, x_bounds,\
-			c_ids, eq_ids, ub_ids
+		assert len(b_eq) == len(eq_ids), "b_eq shape:" + str(b_eq.shape)
+		########################################################################
+		# c, first find scales (weights) of each item
+		c_coef = [scales[_opt.item_names[i]] for i in c_ids]
+		assert len(c_coef) == len(c_ids), "c_coef len:" + str(len(c_coef))
+		# c is the matrix product of c_coef.T * A_c, NOTE: change to minimize
+		# thus multiply by -1
+		c = -_numpy_m_.dot(c_coef, A_c)
+		assert c.shape == (_opt.A_T.shape[1], ), "c shape:" + str(c.shape)
+		########################################################################
+		# now also include c related lines lines into ub, I don't want negative
+		# amount of 'inputs'; this does not need to change sign
+		A_cub = _numpy_m_.vstack([A_c, A_ub])
+		b_cub = _numpy_m_.zeros(n_items - len(eq_ids), dtype = float)
+		########################################################################
+		# build return value
+		param = LinearProgrammingParam()
+		param.c = c
+		param.A_c = A_c
+		param.A_eq = A_eq
+		param.b_eq = b_eq
+		param.A_ub = A_ub
+		param.b_ub = b_ub
+		param.A_cub = A_cub
+		param.b_cub = b_cub
+		param.x_bounds = [(0, None)] * n_recipes
+		param.c_ids = c_ids
+		param.eq_ids = eq_ids
+		param.ub_ids = ub_ids
+		return param
+
+
+	@staticmethod
+	def _batch_slice(A_T, *ka):
+		return tuple([_numpy_m_.take(A_T, i, axis = 0) for i in ka])
+
+
+	def _refine_restrictions(self,
+			param: LinearProgrammingParam,
+			current_level: int,
+			*,
+			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+			**kw,
+		) -> (bool, LinearProgrammingParam):
+		"""
+		(internal only) dirty codes to refine linear programming parameters
+		when a previous trial failed
+		"""
+		# level 1 refining, removing items that produced by some recipes but are
+		# locked as input
+		# this potentially cause contradictory restrictions as opposite signs
+		if current_level == 0:
+			# find those items
+			# inputs are ub's
+			_opt = optim_data
+			# in raw A_T, it needs to be < 0
+			c_ids = [i for i in param.c_ids if any(_opt.A_T[i] < 0)]
+			if len(c_ids) == len(param.c_ids):
+				return False, None # no refine
+			#print(c_ids)
+			# still, ub_ids is all left behind c_ids and eq_ids
+			# in this case, eq_ids does not need to change
+			ub_ids = [i for i in range(len(_opt.A_T))\
+				if (i not in c_ids) and (i not in param.eq_ids)]
+			#print(ub_ids)
+			refine_param = self._finalize_linear_programming_params(
+				c_ids, param.eq_ids, ub_ids,
+				optim_data = optim_data,
+				**kw)
+		return True, refine_param
