@@ -10,13 +10,13 @@ del scipy # remove from name space, go with _scipy_m_
 from . import linear_optimizer_base as _linear_optimizer_base_m_
 
 
-class MultifurcationOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
+class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 	"""
-	optimizer for Items has multiple source recipes, or recipes has multiple
-	products ran into multifurcations;
+	optimizer for Items have multiple source recipes, from cyclic recipe paths,
+	or recipes have multiple products;
 	"""
 	def __init__(self, *ka, **kw) -> None:
-		super(MultifurcationOptimizer, self).__init__(*ka, **kw)
+		super(LinearProgrammingOptimizer, self).__init__(*ka, **kw)
 		return
 
 
@@ -65,31 +65,27 @@ class MultifurcationOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		"""
 		# pre screening
 		# remove zeros
-		local_prods = optim_goals.copy()
-		zeros_key = [k for k, v in local_prods.items()\
-			if _numpy_m_.isclose(v, 0)]
-		for k in zeros_key:
-			del local_prods[k] # dict shape change
+		goals_local = self._remove_zero_counts(optim_goals)
 		########################################################################
 		# results dicts
 		rexe = _collections_m_.Counter()
 		rawin = _collections_m_.Counter()
 		waste = _collections_m_.Counter()
 		# check empty, make explicit
-		if not local_prods:
+		if not goals_local:
 			return rexe, rawin, waste
 		# prepare
 		max_iter = 1000
 		while True:
 			# prepare
 			recipe_names, recipe_ids, item_names, item_ids, coef_matrix\
-				= self.get_optimizing_coef_matrix(local_prods.keys())
+				= self.get_optimizing_coef_matrix(goals_local.keys())
 			A_T = coef_matrix.T
 			# inputs for linear programming
 			c, A_eq, b_eq, A_ub, b_ub, rA_ub, rb_ub, x_bounds,\
 				c_ids, eq_ids, ub_ids\
 				= self._prepare_linear_programming(
-					optim_goals = local_prods,
+					optim_goals = goals_local,
 					ignore_trivial = ignore_trivial,
 					scales = scales,
 					recipe_names = recipe_names,
@@ -103,19 +99,19 @@ class MultifurcationOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 				A_eq = A_eq, b_eq = b_eq,
 				bounds = x_bounds, method = "simplex",
 				options = {"maxiter": max_iter, "tol": tol})
-			print("c_ids", c_ids, [item_names[i] for i in c_ids])
-			print("eq_ids", eq_ids, [item_names[i] for i in eq_ids])
-			print("ub_ids", ub_ids, [item_names[i] for i in ub_ids])
-			print("--")
-			print("c", c)
-			print(A_T)
-			print("in", item_names)
-			print("rn", recipe_names)
-			print("A_eq", A_eq)
-			print("b_ub", b_ub)
-			print("xb", x_bounds)
-			print("x", res.x)
-			print("yield", _numpy_m_.dot(A_T, res.x.reshape(-1, 1)))
+			#print("c_ids", c_ids, [item_names[i] for i in c_ids])
+			#print("eq_ids", eq_ids, [item_names[i] for i in eq_ids])
+			#print("ub_ids", ub_ids, [item_names[i] for i in ub_ids])
+			#print("--")
+			#print("c", c)
+			#print(A_T)
+			#print("in", item_names)
+			#print("rn", recipe_names)
+			#print("A_eq", A_eq)
+			#print("b_ub", b_ub)
+			#print("xb", x_bounds)
+			#print("x", res.x)
+			#print("yield", _numpy_m_.dot(A_T, res.x.reshape(-1, 1)))
 			#print(res.x)
 			# check results
 			if res.status == 0:

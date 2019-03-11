@@ -2,7 +2,7 @@
 
 import collections as _collections_m_
 from . import recipe_set as _recipe_set_m_
-from . import multifurcation_optimizer as _multifurcation_optimizer_m_
+from . import linear_programming_optimizer as _linear_programming_optimizer_m_
 
 
 class TargetItemNotFoundError(LookupError):
@@ -68,7 +68,7 @@ class ProductionTree(object):
 		# 1. items at multifurcation
 		self._multifurcations = _collections_m_.Counter()
 		# 2. items as product of recipe cycles
-		self._cycle_products = _collections_m_.Counter()
+		self._cyclic_products = _collections_m_.Counter()
 		# below is the raw material input for target
 		# format signature is "item": count
 		self._raw_inputs = _collections_m_.Counter()
@@ -86,7 +86,7 @@ class ProductionTree(object):
 		self._targets.clear()
 		self._recipe_execs.clear()
 		self._multifurcations.clear()
-		self._cycle_products.clear()
+		self._cyclic_products.clear()
 		self._raw_inputs.clear()
 		self._wastings.clear()
 		return
@@ -119,10 +119,10 @@ class ProductionTree(object):
 				# raw material is added to _raw_inputs
 				self._raw_inputs.update({_iname: _icount})
 				continue
-			#slif _item.is_cycle_product():
-			#	self._cycle_products.update({_iname, _icount})
+			#elif _item.is_cyclic_product():
+			#	self._cyclic_products.update({_iname, _icount})
 			#	continue
-			elif _item.is_multifurcation():
+			elif _item.is_multifurcation() or _item.is_cyclic_product():
 				# add to _optim_items for later optimization
 				self._multifurcations.update({_iname: _icount})
 				continue
@@ -180,8 +180,8 @@ class ProductionTree(object):
 		flush current cache of multi-srouce Items and run optimization; results
 		are automatically updated to cache;
 		"""
-		multi_opt = _multifurcation_optimizer_m_.MultifurcationOptimizer(
-			self.get_recipe_set(), copy = False)
+		multi_opt = _linear_programming_optimizer_m_.\
+			LinearProgrammingOptimizer(self.get_recipe_set(), copy = False)
 		op_exec, op_raw, op_wst = multi_opt.optimize(self._multifurcations,
 			**optim_args)
 		for src, dest in zip([op_exec, op_raw, op_wst],

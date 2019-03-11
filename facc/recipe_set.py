@@ -3,6 +3,10 @@
 import collections as _collections_m_
 import warnings as _warnins_m_
 import itertools as _itertools_m_
+import numpy as _numpy_m_
+import scipy as _scipy_m_
+import scipy.optimize
+del scipy # delete entry; use _scipy_m_ instead
 from . import recipe as _recipe_m_
 from . import item as _item_m_
 from . import text_label_encoder as _text_label_encoder_m_
@@ -83,7 +87,7 @@ class RecipeSet(object):
 		if not isinstance(recipe, _recipe_m_.Recipe):
 			raise TypeError("'recipe' must be type of 'Recipe'")
 		# dict key overwrite warning
-		if recipe.name in self._recipes:
+		if self.has_recipe(recipe.name):
 			warnins.warn("overwriting: %s" % str(recipe))
 		if copy:
 			self._recipes[recipe.name] = recipe.copy(net_yield)
@@ -101,6 +105,7 @@ class RecipeSet(object):
 		2) Item collection -> Recipe inputs;
 		3) Recipe -> Recipe down/upstream dependencies;
 		4) Item flags;
+		5) check cyclic group; mark the unique products of the cyclic groups;
 
 		results are stored in:
 		self._items
@@ -111,7 +116,7 @@ class RecipeSet(object):
 		self._recipe_upstr.clear()
 		self._recipe_dwstr.clear()
 		# goal 0, 1, 2
-		for recp in self._recipes.values():
+		for recp in self.iterate_recipes(True):
 			# put recipe name to the correct input_of/product_of list
 			# based on the recipe inputs/products
 			for i in recp.inputs.keys():
@@ -121,17 +126,101 @@ class RecipeSet(object):
 		# goal 3, 4
 		# link recipe upstream/downstream using Item
 		# update Item product_of_complex_recipe flag
-		for i in self._items.values():
+		for i in self.iterate_items(True):
 			for _dw, _up in _itertools_m_.product(i.input_of, i.product_of):
 				self._recipe_upstr.setdefault(_dw, set()).add(_up)
 				self._recipe_dwstr.setdefault(_up, set()).add(_dw)
-			i.set_product_of_complex_recipe(
-				any([(len(self.get_recipe(r).products) >= 2)\
-					for r in i.product_of]))
+			_flag = any([(self.get_recipe(r).n_products() >= 2)
+				for r in i.product_of])
+			i.setflag_product_of_complex_recipe(_flag)
+		# refresh encoders
+		self.recipe_encoder.train(self.iterate_recipes())
+		self.item_encoder.train(self.iterate_items())
 		# for correctness, clear these data
 		# since these are calculated upon linkages
 		self._graph = None
 		self._coef_mat = None
+		# now deal with cyclic recipes
+		self._cache_cyclic_recipe_groups()
+		return
+
+
+	# TODO: need a good name of this function
+	def _cache_cyclic_recipe_groups(self):
+		"""
+		(internal only) resolve cyclic groups:
+		1) identify all cyclic groups;
+		2) check if all groups are bounded;
+		3) identify unique products in these cyclic groups
+		4) mark these Items' cyclic_product flag
+		"""
+		#print(len(self._recipes))
+		cyclic_groups = self.get_graph().get_cyclic_vertex_groups()
+		#print(cyclic_groups)
+		#print(self.has_recipe("uranium-fuel-consumption"))
+		for cyc in cyclic_groups:
+			recps = self.recipe_encoder.decode(cyc)
+			if self._is_cyclic_group_valid(recps):
+				# now get all products of these recipes
+				all_prods = self.extract_items_from_recipes(recps,\
+					"product_only")
+				# find these prods which are unique to the cycle
+				# i.e. all recipes in prod.product_of is in the cycle
+				for p in all_prods:
+					p_obj = self.get_item(p)
+					if all([r in recps for r in p_obj.product_of]):
+						p_obj.setflag_cyclic_product(True)
+						#print(p)
+			else:
+				_warnins_m_.warn("cyclic group '%s' detected, however, it seems\
+					perpetual; cyclic optimization on this group is disabled"\
+					% (",".join(recps)), UserWarning)
+		return
+
+
+	def _is_cyclic_group_valid(self, recipe_list: list) -> bool:
+		"""
+		(internal only) check cyclic group if is valid;
+		the cyclic group is valid only if there is no trivial operation of some
+		recipes, such that all Items are positive;
+		i.e. the group must be "consuming" something, i.e. not perpetual;
+		this can be checked with UNBOUNDED linear programming;
+		"""
+		recipe_list = sorted(recipe_list)
+		n_recipes = len(recipe_list)
+		assert n_recipes >= 2
+		all_items = self.extract_items_from_recipes(recipe_list)
+		all_items = sorted(all_items)
+		n_items = len(all_items)
+		coef_matrix = _coef_matrix_m_.\
+			CoefficientMatrix((len(recipe_list), len(all_items)))
+		for ir, rname in enumerate(recipe_list):
+			recipe = self.get_recipe(rname)
+			#print(rname)
+			for iname, count in recipe.inputs.items():
+				#print(iname)
+				coef_matrix[ir, all_items.index(iname)] = -count
+			for iname, count in recipe.products.items():
+				#print(iname)
+				coef_matrix[ir, all_items.index(iname)] = count
+		# test using linprog
+		A_T = -coef_matrix.T
+		b_ub = _numpy_m_.zeros(n_items, dtype = float)
+		c = _numpy_m_.ones(n_recipes, dtype = float)
+		x_bounds = [(0, None)] * n_recipes
+		# check linear programming
+		res = _scipy_m_.optimize.\
+			linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
+		if (res.status == 0) and all(_numpy_m_.isclose(res.x, 0)):
+			# good results; the only solution is trivial (all zeros)
+			return True
+		elif res.status == 2:
+			# though not know how it is possible, but we still check
+			raise RuntimeError(res)
+		elif res.status == 3:
+			# unbounded is failure
+			return False
+		raise RuntimeError(res)
 		return
 
 
@@ -140,16 +229,16 @@ class RecipeSet(object):
 		refresh caches by recalculating from local Recipes data;
 		necessary to ensure correctness after updating Recipes;
 		"""
-		# rescue trivial flags since self._items will be refreshed
-		trivials = self.get_trivials()
+		# rescue manual flags since self._items will be refreshed
+		forced_raws = self.query_items(lambda x: x.is_forced_raw())
+		trivials = self.query_items(lambda x: x.is_trivial())
 		# refresh
 		self._setup_recipe_item_search_cache()
-		self.recipe_encoder.train(self._recipes.keys())
-		self.item_encoder.train(self._items.keys())
 		# lazy load now
 		#self._graph = self.to_graph()
 		#self._coef_mat = self.to_coef_matrix()
-		self.set_trivials(trivials)
+		self.set_items_flag(forced_raws, lambda x: x.setflag_forced_raw(True))
+		self.set_items_flag(trivials, lambda x: x.setflag_trivial(True))
 		return
 
 
@@ -165,9 +254,18 @@ class RecipeSet(object):
 		"""
 		if net_yield is None:
 			net_yield = self.is_net_yield
-		new = type(self)(self._recipes.values(), net_yield = net_yield)
-		# copy item trivial falgs
-		new.set_trivials(self.get_trivials())
+		new = type(self)(self.iterate_recipes(True), net_yield = net_yield)
+		# copy item manual falgs
+		for query_expr, set_expr in [
+				(lambda x: x.is_forced_raw(), lambda x: x.setflag_forced_raw(True)),
+				(lambda x: x.is_trivial(), lambda x: x.setflag_trivial(True)),
+			]:
+			item_list = self.query_items(query_expr)
+			new.set_items_flag(item_list, set_expr)
+		assert len(self.item_encoder) != 0
+		assert len(self.recipe_encoder) != 0
+		print(len(self.item_encoder))
+		print(len(self.recipe_encoder))
 		return new
 
 
@@ -189,18 +287,24 @@ class RecipeSet(object):
 		return self._items[item_name]
 
 
-	def iterate_recipes(self) -> iter:
+	def iterate_recipes(self, return_object = False) -> iter:
 		"""
-		return a iterator traversing names of all current Recipes
+		return a iterator traversing all current Recipes
 		"""
-		return self._recipes.keys()
+		if return_object:
+			return self._recipes.values()
+		else:
+			return self._recipes.keys()
 
 
-	def iterate_items(self) -> iter:
+	def iterate_items(self, return_object = False) -> iter:
 		"""
-		return a iterator traversing names of all current Items
+		return a iterator traversing all current Items
 		"""
-		return self._items.keys()
+		if return_object:
+			return self._items.values()
+		else:
+			return self._items.keys()
 
 
 	def has_recipe(self,
@@ -221,30 +325,27 @@ class RecipeSet(object):
 		return item_name in self._items
 
 
-	def force_raws(self,
-			item_names: list,
-			force_raw: bool = True,
-		) -> None:
+	def query_items(self,
+			expr: callable
+		) -> list:
 		"""
-		mark a given list of Items with flag <force_raw>;
+		get a list of names of Items that evaluate True with <expr>;
 
 		PARAMETERS
 		----------
-		item_names:
-			list of Item names;
+		expr:
+			callable with signature Item -> bool;
 
-		force_raw:
-			if True, these Items are marked as raw input; unlike <trivial> flag,
-			<force_raw> Items are still optimized;
+		RETURNS
+		-------
+		list of Item names;
 		"""
-		for i in item_names:
-			self.get_item(i).set_forced_raw(force_raw)
-		return
+		return [i.name for i in filter(expr, self.iterate_items(True))]
 
 
-	def set_trivials(self,
+	def set_items_flag(self,
 			item_names: list,
-			is_trivial: bool = True,
+			expr: callable,
 		) -> None:
 		"""
 		mark a given list of Items with flag <trivial>;
@@ -254,32 +355,11 @@ class RecipeSet(object):
 		item_names:
 			list of Item names;
 
-		is_trivial:
-			if True, these Items are marked as raw input and will be disabled
-			from input optimization;
+		expr:
+			callable with Item as input argument;
 		"""
 		for i in item_names:
-			self.get_item(i).set_trivial(is_trivial)
-		return
-
-
-	def get_trivials(self) -> list:
-		"""
-		get a list of Item names that are marked as <is_trivial>
-
-		RETURNS
-		-------
-		list of Item names
-		"""
-		return [i.name for i in self._items.values() if i.is_trivial()]
-
-
-	def remova_all_trivial_flags(self) -> None:
-		"""
-		set all Items' <is_trivial> flag to be False;
-		"""
-		for i in self._items.values():
-			i.set_trivial(False)
+			expr(self.get_item(i))
 		return
 
 
@@ -295,7 +375,7 @@ class RecipeSet(object):
 		_recp = lambda x: self.get_recipe(x)
 		# check for recipes-item connection
 		for r, i in _itertools_m_.product(
-			self._recipes.values(), self._items.values()):
+			self.iterate_recipes(True), self.iterate_items(True)):
 			if (i.name in r.products) != (r.name in i.product_of):
 				break
 			if (i.name in r.inputs) != (r.name in i.input_of):
@@ -340,6 +420,8 @@ class RecipeSet(object):
 		-------
 		constructed matrix (float 2-d);
 		"""
+		assert len(self.item_encoder) != 0
+		assert len(self.recipe_encoder) != 0
 		n_recipes = len(self._recipes)
 		n_items = len(self._items)
 		coef_mat = _coef_matrix_m_.CoefficientMatrix((n_recipes, n_items))
@@ -416,6 +498,41 @@ class RecipeSet(object):
 		return ret
 
 
+	def extract_items_from_recipes(self,
+			recipe_names: list,
+			subset: str = "both",
+		) -> set:
+		"""
+		return the set of all involved Items given a list of Recipe names;
+
+		PARAMETERS
+		----------
+		recipe_names:
+			a list of names of Recipes that to be processed;
+
+		subset:
+			the subset (inputs and/or products) to extract; acceptable values
+			are 'input_only', 'product_only' and 'both'
+
+		RETURNS
+		-------
+		a list of Item names that are extracted
+		"""
+		if subset == "both":
+			subsetting = lambda x: (x.inputs.keys(), x.products.keys())
+		elif subset == "input_only":
+			subsetting = lambda x: (x.inputs.keys(), )
+		elif subset == "product_only":
+			subsetting = lambda x: (x.products.keys(), )
+		else:
+			raise ValueError("'subset' can only be one of: 'input_only', "\
+				+ "'product_only' and 'both'")
+		ret = set()
+		for rn in recipe_names:
+			ret.update(*subsetting(self.get_recipe(rn)))
+		return ret
+
+
 class RecipeSetEmbed(object):
 	"""
 	class decorator;
@@ -472,4 +589,7 @@ class RecipeSetEmbed(object):
 
 			def fetch_recipe_dependency(self, *ka, **kw) -> dict:
 				return self._rset_emb_recipe_set.fetch_recipe_dependency(*ka, **kw)
+
+			def extract_items_from_recipes(self, *ka, **kw) -> set:
+				return self._rset_emb_recipe_set.extract_items_from_recipes(*ka, **kw)
 		return embed_c

@@ -11,6 +11,7 @@ import collections
 import graphviz
 #
 import facc
+import versions
 
 
 TIME_UNITS = ["sec", "min", "hr"]
@@ -19,12 +20,18 @@ TIME_TO_SEC = {
 	"min": 60.0,
 	"hr": 3600.0,
 }
-FACTORIO = facc.load_factorio_version_tunes("0.15")
 
 
 ################################################################################
 # argument parse
 def get_args():
+	# get version first
+	ap_ver = argparse.ArgumentParser(add_help = False)
+	ap_ver.add_argument("-v", "--factorio-version", type = str,\
+		default = versions.default)
+	ver, other_args = ap_ver.parse_known_args()
+	FACTORIO = versions.get(ver.factorio_version)
+
 	# the full argument parser
 	ap = argparse.ArgumentParser()
 	ap.add_argument("targets", type = str,
@@ -34,9 +41,9 @@ def get_args():
 			set to -, assuming in CSV format (each line being a target)")
 	#
 	ag = ap.add_argument_group("basic options")
-	ag.add_argument("-r", "--recipe", type = str,
-		metavar = "json", required = True,
-		help = "recipe data file in json format (required)")
+	ag.add_argument("-v", "--factorio-version", type = str, metavar = "ver",
+		default = versions.default,
+		help = "use recipe database version (default: %s)" % versions.default)
 	ag.add_argument("--list-items", action = "store_true",
 		help = "list all items (in file specified by -r) and exit")
 	ag.add_argument("--list-recipes", action = "store_true",
@@ -83,19 +90,20 @@ def get_args():
 	# this action happens before the main argument parse
 	# and should be ignore parsing errors unique to the full parsing
 	ap_list = argparse.ArgumentParser(add_help = False)
-	ap_list.add_argument("-r", "--recipe", nargs = "?", default = None)
 	ap_list.add_argument("--list-items", action = "store_true")
 	ap_list.add_argument("--list-recipes", action = "store_true")
 	ap_list.add_argument("--yield-level", type = str, default = "normal")
 	# if recipe is not set, go to the full parsing
 	# that will take care of error throwing
 	args, unkowns = ap_list.parse_known_args()
-	if args.recipe:
-		if args.list_items or args.list_recipes:
-			print_items_and_recipes(args)
-			exit(0)
+	args.FACTORIO = FACTORIO
+	if args.list_items or args.list_recipes:
+		print_items_and_recipes(args)
+		ap_list.exit(0)
 	# full parsing
 	args = ap.parse_args()
+	# put FACTORIO  to the name space
+	args.FACTORIO = FACTORIO
 	# refine args
 	args.refined_targets = argsrefine_parse_targets(args)
 	args.refined_excluded_recipes = argsrefine_excluded_recipes(args)
@@ -146,7 +154,7 @@ def argsrefine_manual_raws(_args) -> list:
 ################################################################################
 # viewing
 def print_items_and_recipes(_args) -> None:
-	recp_list = load_raw_recipes(_args.recipe)
+	recp_list = load_raw_recipes(_args.FACTORIO.RECIPE_JSON)
 	recipe_set = get_recipe_set(recp_list,
 		yield_level = _args.yield_level)
 	for _flag, _header, _iter in [
@@ -154,7 +162,7 @@ def print_items_and_recipes(_args) -> None:
 			(_args.list_recipes, "RECIPES >> %s", recipe_set.iterate_recipes()),
 		]:
 		if _flag:
-			h = _header % _args.recipe
+			h = _header % _args.FACTORIO.RECIPE_JSON
 			print("_" * len(h), file = sys.stdout)
 			for i in sorted(_iter):
 				print(i, file = sys.stdout)
@@ -167,9 +175,11 @@ def main():
 	args = get_args()
 	# resolving args
 	# load, refining data
-	recp_list = load_raw_recipes(args.recipe)
+	recp_list = load_raw_recipes(args.FACTORIO.RECIPE_JSON)
+	assert type(recp_list) == list
 	# make RecipeSet
 	append_madeup_recipes_inplace(recp_list, args)
+	assert any([i["name"] == "uranium-fuel-consumption" for i in recp_list])
 	recipe_set = get_recipe_set(recp_list,
 		yield_level = args.yield_level,
 		excluded_recipes = args.refined_excluded_recipes)
@@ -177,12 +187,13 @@ def main():
 		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
 	# towards production calculations
 	prod_tree = ExportableProductionTree(recipe_set)
-	obj_scales = get_optim_obj_scales(args.refined_trivials)
+	obj_scales = get_optim_obj_scales(args)
 	# do calculation
 	prod_tree.calculate_targets(args.refined_targets,\
 		optim_args = dict(scales = obj_scales, tol = args.tolerance))
 	# output
-	prod_tree.to_tabular(file = sys.stdout, time_unit = args.rate_unit)
+	prod_tree.to_tabular(file = sys.stdout,\
+		tune_db = args.FACTORIO, time_unit = args.rate_unit)
 	if args.graph:
 		prod_tree.visualize(file = args.graph)
 	return
@@ -202,7 +213,7 @@ def load_raw_recipes(json_f: str) -> list:
 
 
 def append_madeup_recipes_inplace(recipe_list, _args):
-	recipe_list += FACTORIO.MADEUP_RECIPES
+	recipe_list += _args.FACTORIO.MADEUP_RECIPES
 	return
 
 
@@ -234,15 +245,16 @@ def apply_maunal_item_flags(recipe_set,
 		raw_items = [],
 		trivial_items = [],
 	) -> None:
-	recipe_set.force_raws(raw_items)
-	recipe_set.set_trivials(trivial_items)
+	recipe_set.set_items_flag(raw_items, lambda x: x.setflag_forced_raw(True))
+	recipe_set.set_items_flag(trivial_items, lambda x: x.setflag_trivial(True))
 	return
 
 
-def get_optim_obj_scales(excludes: list or dict = []) -> dict:
+def get_optim_obj_scales(_args) -> dict:
 	# currently this function does not support user specification
 	# fluids are 1/10 of solids for balance
-	ret = {i: 0.1 for i in FACTORIO.FLUIDS if i not in excludes}
+	ret = {i: 0.1 for i in _args.FACTORIO.FLUIDS\
+		if i not in _args.refined_trivials}
 	return ret
 
 
@@ -285,9 +297,9 @@ class ExportableProductionTree(facc.ProductionTree):
 		return
 
 
-	def to_tabular_handler(self, fh, time_unit = "min", header = "") -> None:
-		category_cfg = FACTORIO.RECIPE_CATEGORIES
-		crafter_cfg = FACTORIO.CRAFTERS
+	def to_tabular_handler(self, fh, tune_db, time_unit, header = "") -> None:
+		category_cfg = tune_db.RECIPE_CATEGORIES
+		crafter_cfg = tune_db.CRAFTERS
 		targ, rexe, raw, wst = self.get_current_tree()
 		cons, prod = self.get_item_summary()
 		########################################################################

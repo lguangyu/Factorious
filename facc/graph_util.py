@@ -188,6 +188,7 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 			# travel
 			while visited_path:
 				next_visit = to_visit[-1]
+				#print(visited_path)
 				# visit each node in next_visit
 				while next_visit:
 					_vid = next_visit.pop()
@@ -210,8 +211,8 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 						cycle_path = visited_path[_id:]
 						cycles.append(set(mapback(cycle_path)))
 						continue
-				else:
-				#if not to_visit[-1]:
+				#else:
+				if not to_visit[-1]:
 					to_visit.pop()
 					visited_path.pop()
 			# update mask

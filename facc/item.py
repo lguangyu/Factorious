@@ -120,7 +120,7 @@ class Item(object):
 		"""
 		return raw value of cyclic_product flag;
 		"""
-		return self.cyclic_product
+		return self.flags.cyclic_product
 
 
 	def is_trivial(self) -> bool:
@@ -137,7 +137,7 @@ class Item(object):
 		return self.flags.forced_raw
 
 
-	def set_product_of_complex_recipe(self, value: bool) -> None:
+	def setflag_product_of_complex_recipe(self, value: bool) -> None:
 		"""
 		set value of product_of_complex_recipe flag;
 		"""
@@ -145,7 +145,7 @@ class Item(object):
 		return
 
 
-	def set_cyclic_product(self, value: bool) -> None:
+	def setflag_cyclic_product(self, value: bool) -> None:
 		"""
 		set value of cyclic_product flag;
 		"""
@@ -153,7 +153,7 @@ class Item(object):
 		return
 
 
-	def set_trivial(self, value: bool) -> None:
+	def setflag_trivial(self, value: bool) -> None:
 		"""
 		set value of trivial flag;
 		"""
@@ -161,7 +161,7 @@ class Item(object):
 		return
 
 
-	def set_forced_raw(self, value: bool) -> None:
+	def setflag_forced_raw(self, value: bool) -> None:
 		"""
 		set value of forced_raw flag;
 		"""

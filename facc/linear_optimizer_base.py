@@ -11,6 +11,12 @@ class OptimizationInfeasibleError(RuntimeError):
 
 @_recipe_set_m_.RecipeSetEmbed()
 class LinearOptimizerBase(object):
+	_status_dict_ = {
+		"success": "success",
+		"trivial": "trivial",
+		"fail": "fail",
+	}
+
 	"""
 	basic helper functions and methods shared by all linear optimizer classes;
 	"""
@@ -123,36 +129,10 @@ class LinearOptimizerBase(object):
 		return recipe_names, recipe_ids, item_names, item_ids, coef_matrix
 
 
-	def extract_items_from_recipes(self,
-			recipe_names: list,
-			subset: str = "both",
-		) -> set:
+	@staticmethod
+	def _remove_zero_counts(goals):
 		"""
-		return the set of all involved Items given a list of Recipe names;
-
-		PARAMETERS
-		----------
-		recipe_names:
-			a list of names of Recipes that to be processed;
-
-		subset:
-			the subset (inputs and/or products) to extract; acceptable values
-			are 'input_only', 'product_only' and 'both'
-
-		RETURNS
-		-------
-		a list of Item names that are extracted
+		(internal only) filter count zero targets in the dict; return a copy;
 		"""
-		if subset == "both":
-			subsetting = lambda x: (x.inputs.keys(), x.products.keys())
-		elif subset == "input_only":
-			subsetting = lambda x: (x.inputs.keys(), )
-		elif subset == "product_only":
-			subsetting = lambda x: (x.products.keys(), )
-		else:
-			raise ValueError("'subset' can only be one of: 'input_only', "\
-				+ "'product_only' and 'both'")
-		ret = set()
-		for rn in recipe_names:
-			ret.update(*subsetting(self.get_recipe(rn)))
-		return ret
+		assert isinstance(goals, dict)
+		return {k: v for k, v in goals.items() if not _numpy_m_.isclose(v, 0)}
