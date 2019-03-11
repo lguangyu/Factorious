@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 
-import collections as _collections_m_
+import collections
+from . import stub
 
 
-class _FactorioTunes(object):
-	# namespace use
+class FactorioTunesDB_v015(stub.FactorioTunesBase):
 	def __init__(self, *ka, **kw):
-		super(_FactorioTunes, self).__init__()
-		return
+		super(FactorioTunesDB_v015, self).__init__(*ka, **kw)
+		self.RECIPE_JSON = "./versions/recipe.0.15.base.json"
 
-
-class FactorioTunes015(_FactorioTunes):
-	def __init__(self, *ka, **kw):
-		super(FactorioTunes015, self).__init__(*ka, **kw)
 		# crafter settings
 		self.CRAFTERS = {
 			"assembling-machine-1": {
@@ -68,7 +64,7 @@ class FactorioTunes015(_FactorioTunes):
 		}
 
 		# create a "category": ["crafter"] dict
-		self.RECIPE_CATEGORIES = _collections_m_.defaultdict(list)
+		self.RECIPE_CATEGORIES = collections.defaultdict(list)
 		for k, v in self.CRAFTERS.items():
 			for t in v["recipe_type"]:
 				self.RECIPE_CATEGORIES[t].append(k)
@@ -87,7 +83,7 @@ class FactorioTunes015(_FactorioTunes):
 		# fluids
 		self.FLUIDS = [
 			"crude-oil",
-			"heavy-old",
+			"heavy-oil",
 			"light-oil",
 			"lubricant",
 			"petroleum-gas",
@@ -123,26 +119,18 @@ class FactorioTunes015(_FactorioTunes):
 		# example is "heavy-oil" when disabling basic and advanced oil processings
 		# then since coal liquefaction is the only recipe, it is non-ambiguous;
 		# but balancing the side products of it is toxic
-		self.ENFORCE_OPTIMIZE = [
-			"heavy-oil",
-		]
+		#
+		# 2019-03-09 update:
+		# CURRENTLY DEPRECATED
+		# now all products of a multi-product recipe are forced to going through
+		# optimizer, obviously including heavy-oil
+		#self.ENFORCE_OPTIMIZE = [
+		#	"heavy-oil",
+		#]
+
+		# accompany this item in optimization process
+		# if force the 
+		self.ITEM_ACCOMPANY = {
+			"uranium-fuel-cell": {"used-up-uranium-fuel-cell": 1},
+		}
 		return
-
-
-def load_factorio_version_tunes(version: str) -> _FactorioTunes:
-	"""
-	get Factorio tunes configs
-
-	PARAMETERS
-	----------
-	version:
-		str of Factorio version;
-
-	EXCEPTIONS
-	----------
-	LookupError: if <version> does not match anything in database
-	"""
-	if version == "0.15":
-		return FactorioTunes015()
-	else:
-		LookupError("bad Factorio version descriptor: '%s'" % version)

@@ -2,7 +2,7 @@
 
 import collections as _collections_m_
 from . import recipe_set as _recipe_set_m_
-from . import linear_optimizer as _linear_optimizer_m_
+from . import linear_programming_optimizer as _linear_programming_optimizer_m_
 
 
 class TargetItemNotFoundError(LookupError):
@@ -62,10 +62,13 @@ class ProductionTree(object):
 		# below is calculated as the execution times for each enrolled recipe
 		# format signature is "recipe": exec_count
 		self._recipe_execs = _collections_m_.Counter()
-		# below is the dict of items that must be solved using optimizations
+		# below is the dicts of items that must be solved using optimizations
 		# format signature is "item": count
 		# these items are optimized in final step
-		self._optim_items = _collections_m_.Counter()
+		# 1. items at multifurcation
+		self._multifurcations = _collections_m_.Counter()
+		# 2. items as product of recipe cycles
+		self._cyclic_products = _collections_m_.Counter()
 		# below is the raw material input for target
 		# format signature is "item": count
 		self._raw_inputs = _collections_m_.Counter()
@@ -82,7 +85,8 @@ class ProductionTree(object):
 		"""
 		self._targets.clear()
 		self._recipe_execs.clear()
-		self._optim_items.clear()
+		self._multifurcations.clear()
+		self._cyclic_products.clear()
 		self._raw_inputs.clear()
 		self._wastings.clear()
 		return
@@ -115,9 +119,12 @@ class ProductionTree(object):
 				# raw material is added to _raw_inputs
 				self._raw_inputs.update({_iname: _icount})
 				continue
-			elif _item.has_multiple_source() or _item.need_optimize:
+			#elif _item.is_cyclic_product():
+			#	self._cyclic_products.update({_iname, _icount})
+			#	continue
+			elif _item.is_multifurcation() or _item.is_cyclic_product():
 				# add to _optim_items for later optimization
-				self._optim_items.update({_iname: _icount})
+				self._multifurcations.update({_iname: _icount})
 				continue
 			else:
 				# the item can only be produced in one source
@@ -173,15 +180,15 @@ class ProductionTree(object):
 		flush current cache of multi-srouce Items and run optimization; results
 		are automatically updated to cache;
 		"""
-		linopt = _linear_optimizer_m_.LinearOptimizer(self.get_recipe_set(),
-			copy = False)
-		op_exec, op_raw, op_wst = linopt.optimize(self._optim_items,
+		multi_opt = _linear_programming_optimizer_m_.\
+			LinearProgrammingOptimizer(self.get_recipe_set(), copy = False)
+		op_exec, op_raw, op_wst = multi_opt.optimize(self._multifurcations,
 			**optim_args)
 		for src, dest in zip([op_exec, op_raw, op_wst],
 			[self._recipe_execs, self._raw_inputs, self._wastings]):
 			for k, v in src.items():
 				dest.update({k: v})
-		self._optim_items.clear()
+		self._multifurcations.clear()
 		return
 
 

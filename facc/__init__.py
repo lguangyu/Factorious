@@ -14,7 +14,5 @@ from .recipe_set import InvalidRecipeSetError,\
 from .production_tree import TargetItemNotFoundError,\
 	ProductionTree
 #
-from .linear_optimizer import OptimizationInfeasibleError,\
-	LinearOptimizer
-#
-from .factorio_tunes import load_factorio_version_tunes
+from .linear_optimizer_base import OptimizationInfeasibleError
+from .linear_programming_optimizer import LinearProgrammingOptimizer

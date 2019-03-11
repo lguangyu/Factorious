@@ -137,3 +137,17 @@ class Recipe(object):
 			name = self.name,
 			net_yield = net_yield)
 		return new
+
+
+	def n_inputs(self) -> int:
+		"""
+		return number of input Items;
+		"""
+		return len(self.inputs)
+
+
+	def n_products(self) -> int:
+		"""
+		return number of product Items;
+		"""
+		return len(self.products)
