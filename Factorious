@@ -24,6 +24,11 @@ TIME_TO_SEC = {
 
 ################################################################################
 # argument parse
+def stage_parse_args(func):
+	def wrapper(argv, namespace):
+		pass
+
+
 def _stage_argparse_get_factorio_version(argv, namespace):
 	# construction of main argument parser needs this information
 	# local subparser
@@ -83,13 +88,13 @@ def get_args():
 	############################################################################
 	# first get factorio version selection
 	_ver_parser, unparsed\
-		= _stage_argparse_get_factorio_version(unparsed, ns)
+		= _stage_argparse_get_factorio_version(unparsed, namespace = ns)
 	############################################################################
 	# used if --list-items or --list-recipes are set
 	# this action happens before the main argument parse
 	# and should be ignore parsing errors unique to the full parsing
 	_list_act_parser, unparsed\
-		= _stage_argparse_list_actions(unparsed, ns)
+		= _stage_argparse_list_actions(unparsed, namespace = ns)
 	############################################################################
 	# the full argument parser
 	# note args already has something in it
@@ -123,37 +128,55 @@ def get_args():
 			(a.k.a. naturally raw); raw material is considered as direct\
 			input and will prevent further upstream traversing of the recipe\
 			tree (default: <empty>)")
+	ag = ap.add_argument_group("optimization options")
+	ag.add_argument("--tolerance", type = float,
+		metavar = "float", default = 1e-6,
+		help = "float comparison tolerance used in optimization (default: 1e-6)")
+	ag.add_argument("--use-weight", type = str,
+		metavar = "item1,%v:item2,%v:...", default = "",
+		help = "force items on this list, separated by colon (:), using the\
+			assigned weight values (v's) when calculating the optimization\
+			object function; higher weight instructs the optimizer to search for\
+			a solution using correspondingly less; the default weight for fluids\
+			is %.2f and 1.0 for all others; explicitly specifying weight values\
+			overrides the trivial flag for assigned items (default <empty>)"\
+			% ns.FACTORIO.DEFAULT_FLUID_WEIGHT)
 	ag.add_argument("--append-trivial", type = str,
 		metavar = "item1,item2,...", default = "",
 		help = "assign listed items, separated by comma (,), to be manually\
 			trivial in addition to the default list [%s] (if used); trivial\
 			material has all properties of raw material, and additionally are\
-			excluded from optimization on consumption (default: <empty>)"\
+			excluded from optimization on consumption; it is equivalent to set\
+			both --raw-material and --use-weight to 0.0 for that item\
+			(default: <empty>)"\
 			% (",".join(ns.FACTORIO.COMMON_TRIVIALS)))
 	ag.add_argument("--no-default-trivial", action = "store_true",
 		help = "do not use the default trivial items list [%s] (default: off)"\
 			% (",".join(ns.FACTORIO.COMMON_TRIVIALS)))
-	ag = ap.add_argument_group("optimization options")
-	ag.add_argument("--tolerance", type = float,
-		metavar = "float", default = 1e-6,
-		help = "float comparison tolerance used in optimization (default: 1e-6)")
 	# full parsing
 	ap.parse_args(unparsed, ns)
 	# refine args
 	ns.refined_targets = argsrefine_parse_targets(ns)
 	ns.refined_excluded_recipes = argsrefine_excluded_recipes(ns)
-	ns.refined_trivials = argsrefine_trivials(ns)
 	ns.refined_raws = argsrefine_manual_raws(ns)
+	ns.refined_trivials = argsrefine_trivials(ns)
+	ns.refined_weights = argsrefine_weights_after_trivial(ns)
 	return ns
 
 
 ################################################################################
 # argument refinings
-def parse_target_str_to_key_value(s: str) -> (str, float):
+def parse_item_key_value_pair(
+		s: str,
+		#default_value: float = None,
+	) -> (str, float):
 	kv = s.split(",")
-	if len(kv) != 2:
-		raise ValueError("bad target: '%s'" % s)
-	return kv[0], float(kv[1])
+	if len(kv) == 2:
+		return kv[0], float(kv[1])
+	#elif (len(kv) == 1) and (default_value is not None):
+	#	return kv[0], float(default_value)
+	raise ValueError("bad <item,value> pair: '%s'" % s)
+	return
 
 
 def argsrefine_parse_targets(_args) -> dict:
@@ -161,7 +184,7 @@ def argsrefine_parse_targets(_args) -> dict:
 		ts = sys.stdin.read().splitlines()
 	else:
 		ts = _args.targets.split(":")
-	return dict([parse_target_str_to_key_value(t) for t in ts])
+	return dict([parse_item_key_value_pair(t) for t in ts if t])
 
 
 def argsrefine_excluded_recipes(_args) -> list:
@@ -174,15 +197,28 @@ def argsrefine_excluded_recipes(_args) -> list:
 	return ret
 
 
-def argsrefine_trivials(_args) -> list:
-	trivials = _args.append_trivial.split(",")
+def argsrefine_trivials(_args) -> set:
+	trivials = filter(bool, _args.append_trivial.split(","))
+	trivials = set(trivials)
 	if not _args.no_default_trivial:
-		trivials += _args.FACTORIO.COMMON_TRIVIALS
-	return list(set(trivials)) # remove duplicates
+		trivials.update(_args.FACTORIO.COMMON_TRIVIALS)
+	return trivials
 
 
 def argsrefine_manual_raws(_args) -> list:
 	return _args.raw_material.split(",")
+
+
+def argsrefine_weights_after_trivial(_args) -> dict:
+	# first, add default
+	ws = {i: _args.FACTORIO.DEFAULT_FLUID_WEIGHT\
+		for i in _args.FACTORIO.FLUIDS if i not in _args.refined_trivials}
+	# parse user specified
+	user = dict([parse_item_key_value_pair(i)\
+		for i in _args.use_weight.split(":") if i])
+	# merge, also override default
+	ws.update(user)
+	return ws
 
 
 ################################################################################
@@ -203,10 +239,9 @@ def main():
 		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
 	# towards production calculations
 	prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
-	obj_scales = get_optim_obj_scales(args)
 	# do calculation
 	prod_tree.calculate_targets(args.refined_targets,\
-		optim_args = dict(scales = obj_scales, tol = args.tolerance))
+		optim_args = dict(weights = args.refined_weights, tol = args.tolerance))
 	# output
 	prod_tree.to_tabular(file = sys.stdout,\
 		tune_db = args.FACTORIO, time_unit = args.rate_unit)
@@ -268,14 +303,6 @@ def apply_maunal_item_flags(recipe_set,
 	recipe_set.set_items_flag(trivial_items,
 		action = lambda x: x.setflag_trivial(True))
 	return
-
-
-def get_optim_obj_scales(_args) -> dict:
-	# currently this function does not support user specification
-	# fluids are 1/10 of solids for balance
-	ret = {i: 0.1 for i in _args.FACTORIO.FLUIDS\
-		if i not in _args.refined_trivials}
-	return ret
 
 
 ################################################################################
