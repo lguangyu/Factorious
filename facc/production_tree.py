@@ -65,9 +65,10 @@ class ProductionTree(object):
 		# below is the dicts of items that must be solved using optimizations
 		# format signature is "item": count
 		# these items are optimized in final step
-		# 1. items at multifurcation
-		self._multifurcations = _collections_m_.Counter()
+		# 1. items listed to be resolved using linear programming optimizer
+		self._linprog_resolves = _collections_m_.Counter()
 		# 2. items as product of recipe cycles
+		# CURRENTLY NOT USED
 		self._cyclic_products = _collections_m_.Counter()
 		# below is the raw material input for target
 		# format signature is "item": count
@@ -85,7 +86,7 @@ class ProductionTree(object):
 		"""
 		self._targets.clear()
 		self._recipe_execs.clear()
-		self._multifurcations.clear()
+		self._linprog_resolves.clear()
 		self._cyclic_products.clear()
 		self._raw_inputs.clear()
 		self._wastings.clear()
@@ -124,7 +125,7 @@ class ProductionTree(object):
 			#	continue
 			elif _item.is_multifurcation() or _item.is_cyclic_product():
 				# add to _optim_items for later optimization
-				self._multifurcations.update({_iname: _icount})
+				self._linprog_resolves.update({_iname: _icount})
 				continue
 			else:
 				# the item can only be produced in one source
@@ -182,13 +183,13 @@ class ProductionTree(object):
 		"""
 		multi_opt = _linear_programming_optimizer_m_.\
 			LinearProgrammingOptimizer(self.get_recipe_set(), copy = False)
-		op_exec, op_raw, op_wst = multi_opt.optimize(self._multifurcations,
-			**optim_args)
+		op_exec, op_raw, op_wst = multi_opt.optimize(self._linprog_resolves,
+			optim_args)
 		for src, dest in zip([op_exec, op_raw, op_wst],
 			[self._recipe_execs, self._raw_inputs, self._wastings]):
 			for k, v in src.items():
 				dest.update({k: v})
-		self._multifurcations.clear()
+		self._linprog_resolves.clear()
 		return
 
 

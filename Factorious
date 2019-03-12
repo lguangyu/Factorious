@@ -101,9 +101,9 @@ def get_args():
 	ap = argparse.ArgumentParser(parents = [_ver_parser, _list_act_parser])
 	ap.add_argument("targets", type = str,
 		help = "production targets for calculation, in <item,rate> format for\
-			each target, separated by plus (+) between targets; for example,\
-			'inserter,10+iron-plate,20+science-pack-1,10'; read from stdin if\
-			set to -, assuming in CSV format (each line being a target)")
+			each target, separated by colon (:) between targets; for example,\
+			'inserter,10:iron-plate,20:science-pack-1,10'; read from stdin if\
+			set to - and assumes in CSV format (each line being a target)")
 	#
 	ag = ap.add_argument_group("basic options")
 	ag.add_argument("-y", "--yield-level", type = str,
@@ -153,6 +153,13 @@ def get_args():
 	ag.add_argument("--no-default-trivial", action = "store_true",
 		help = "do not use the default trivial items list [%s] (default: off)"\
 			% (",".join(ns.FACTORIO.COMMON_TRIVIALS)))
+	ag.add_argument("--disable-cyclic-optimization", action = "store_true",
+		help = "do not use the cyclic recipe optimizer; this option only affects\
+			optimizing outputs belong to cyclic recipe groups, i.e. which can be\
+			recycled after some other processes and reproduce some of its own\
+			ingredients; e.g. in Factorio version 0.15, the only known of such\
+			is 'uranium-fuel-cell'; assign this flag will force disabling the\
+			recycling and craft purely with raw material (default: off)")
 	# full parsing
 	ap.parse_args(unparsed, ns)
 	# refine args
@@ -241,7 +248,12 @@ def main():
 	prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
 	# do calculation
 	prod_tree.calculate_targets(args.refined_targets,\
-		optim_args = dict(weights = args.refined_weights, tol = args.tolerance))
+		optim_args = dict(
+			weights = args.refined_weights.copy(),
+			ignore_trivial = False,
+			no_cyclic = args.disable_cyclic_optimization,
+			tol = args.tolerance)
+	)
 	# output
 	prod_tree.to_tabular(file = sys.stdout,\
 		tune_db = args.FACTORIO, time_unit = args.rate_unit)
