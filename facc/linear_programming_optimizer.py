@@ -26,11 +26,9 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 
 	def optimize(self,
 			optim_goals: dict,
-			ignore_trivial: bool = False,
-			weights: dict = {},
+			optim_args,
 			*,
-			tol: float = 1e-6,
-			_show_warnings = False,
+			_show_warnings = False, # curretly not used
 		) -> (dict, dict, dict):
 		"""
 		optimize over a set of products targets;
@@ -40,17 +38,20 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		optim_goals (dict with signature "item": count):
 			optimization goal:
 
+		weights (defaultdict with signature "item": <float>):
+			defines extra flexible scaling factors applied to correct value
+			coefficient of corresponding Items in the objective function;
+			default value of defaultdict is forced reset to 1.0;
+			NOTE: specify a scale factor for a particular Item overrides its
+			<is_trivial> flag even <ignore_trivial> is not set;
+
+		no_cyclic:
+			if True, disables cyclic optimization;
+
 		ignore_trivial:
 			if True, ignore the <is_trivial> flag in each Item; if False, the
 			<is_trivial> flag marks such Items as raw material and disables any
 			optimization over them; see Item for more information;
-
-		weights (dict with signature "item": <float>):
-			defines extra flexible scaling
-			factors applied to correct value coefficient of corresponding Items
-			in the objective function; default value is 1.0 globally;
-			NOTE: specify a scale factor for a particular Item overrides its
-			<is_trivial> flag even <ignore_trivial> is not set;
 
 		tol:
 			float comparison tolerance;
@@ -89,18 +90,16 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		########################################################################
 		# fetch data
 		optim_data = self.fetch_optimization_data(goals_local.keys())
-		# update weights
-		weights = self._lookup_weights(optim_data.item_names, ignore_trivial,\
-			user_weights = weights, default = 1.0)
+		# update weights, the weights dict is in optim_args
+		self._update_weights_in_optim_args(optim_args, optim_data)
 		while True:
 			# inputs for linear programming
 			# generate param if None
 			if not param:
 				param = self._prepare_linear_programming(
 					optim_goals = goals_local,
-					ignore_trivial = ignore_trivial,
-					weights = weights,
-					optim_data = optim_data)
+					optim_data = optim_data,
+					**optim_args)
 			# linear programming
 			res = _scipy_m_.linprog(
 				param.c,
@@ -110,7 +109,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 				b_eq = param.b_eq,
 				bounds = param.x_bounds,
 				method = "simplex",
-				options = {"maxiter": max_iter, "tol": tol})
+				options = {"maxiter": max_iter, "tol": optim_args["tol"]})
 			#print("c_ids", param.c_ids)
 			#print([optim_data.item_names[i] for i in param.c_ids])
 			#print("eq_ids", param.eq_ids)
@@ -120,8 +119,9 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 			#print(optim_data.A_T)
 			#print("in", optim_data.item_names)
 			#print("rn", optim_data.recipe_names)
-			#print("A_eq", param.A_eq)
+			#print("A_eq\n", param.A_eq)
 			#print("b_eq", param.b_eq)
+			#print("A_ub\n", param.A_ub)
 			#print("b_ub", param.b_ub)
 			#print("xb", param.x_bounds)
 			#print("x", res.x)
@@ -142,11 +142,12 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 				# potential one solution here, refine the restrictions
 				#if refined_level < refine_max_level:
 				refine_success, param = self._refine_restrictions(
-					param,
+					old_param = param,
 					optim_goals = goals_local,
-					ignore_trivial = ignore_trivial,
-					weights = weights,
-					optim_data = optim_data)
+					optim_data = optim_data,
+					**optim_args)
+					#ignore_trivial = ignore_trivial,
+					#weights = weights,
 				if refine_success:
 					# use refined parameters for another trial
 					continue
@@ -169,56 +170,45 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		return rexe, rawin, waste
 
 
-	def _lookup_weights(self,
-			item_names: list,
-			ignore_trivial: bool = False,
-			user_weights = {},
-			default = 1.0
-		) -> _collections_m_.defaultdict:
+	def _update_weights_in_optim_args(self,
+			optim_args: dict,
+			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+		) -> None:
 		"""
-		(internal only) determine the weight coefficient in calculating the
+		(internal only) determine the weight coefficient for calculating the
 		vector c;
-
-		PARAMETERS
-		----------
-		item_names:
-			all names of Items should be updated
-
-		ignore_trivial:
-			do not regard trivial flag in items
-
-		user_weights:
-			user definition of weights, overrides all automatic values
-
-		default:
-			default value if not specified;
 		"""
-		assert not ignore_trivial
-		ret = _collections_m_.defaultdict(lambda : default)
-		for k in item_names:
-			if k in user_weights:
-				ret[k] = user_weights[k]
-			elif (not ignore_trivial) and self.get_item(k).is_trivial():
-				ret[k] = 0.0
-			# no need to deal with other cases
-		return ret
+		ignore = optim_args["ignore_trivial"]
+		wts = _collections_m_.defaultdict(lambda : 1.0,\
+			optim_args.get("weights", None))
+		for k in optim_data.item_names:
+			# update trivial items with values 0 only if
+			# 1) not set yet, and
+			# 2) ignore_trivial is False, and
+			# 3) this item is marked trivial
+			if (k not in wts) and (not ignore) and self.get_item(k).is_trivial():
+				wts[k] = 0.0
+			# no need to set others
+		# replace original wts
+		optim_args["weights"] = wts
+		return
 
 
 	def _prepare_linear_programming(self, **kw) -> LinearProgrammingParam:
 		"""
 		prepare a full set of linear programming parameters
 		"""
-		ids_set = self._split_restrictions_sections(**kw)
+		ids_set = self._split_restriction_sections(**kw)
 		param = self._finalize_linear_programming_params(*ids_set, **kw)
 		return param
 
 
-	def _split_restrictions_sections(self, *,
+	def _split_restriction_sections(self,
 			optim_goals: dict,
-			ignore_trivial: bool = False,
-			weights: dict = _collections_m_.defaultdict,
-			# below are identical to _get_optimizing_coef_matrix output
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+			# below are passed with **optim_args
+			ignore_trivial: bool = False,
+			**kw, # other unused args passed with **optim_args
 		) -> LinearProgrammingParam:
 		"""
 		(internal only) find sections to determine:
@@ -249,7 +239,6 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		c_ids = bool2index(c_bool)
 		eq_ids = bool2index(eq_bool)
 		ub_ids = bool2index(ub_bool)
-		#print(eq_ids)
 		assert len(c_ids) + len(eq_ids) + len(ub_ids) == n_items,\
 			"c_ids/ub_ids len:" + str([len(c_ids), len(ub_ids)])
 		assert len(eq_ids) == len(optim_goals), "eq_ids shape:" + str(eq_ids.shape)
@@ -257,10 +246,13 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 
 
 	def _finalize_linear_programming_params(self, c_ids, eq_ids, ub_ids, *,
-			optim_goals: dict,
-			ignore_trivial: bool = False,
-			weights: dict = {},
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+			optim_goals: dict,
+			# below are passed with **optim_args
+			weights: dict = _collections_m_.defaultdict(lambda : 1.0),
+			no_cyclic: False,
+			ignore_trivial: bool = False,
+			**kw, # other unused args passed with **optim_args
 		) -> LinearProgrammingParam:
 		"""
 		(internal only) by given:
@@ -302,8 +294,9 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		b_cub = _scipy_m_.zeros(n_items - len(eq_ids), dtype = float)
 		########################################################################
 		# apply cyclic optimization
-		A_eq, b_eq = self._apply_cyclic_product_optimizing(eq_ids, A_eq, b_eq,
-			optim_data = _opt)
+		if not no_cyclic:
+			A_eq, b_eq = self._apply_cyclic_product_optimizing(eq_ids, A_eq, b_eq,
+				optim_data = _opt)
 		########################################################################
 		# build return value
 		param = LinearProgrammingParam()
@@ -353,13 +346,11 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 			# row_id: the id in A_T
 			iname = _opt.item_names[row_id]
 			if self.get_item(iname).is_cyclic_product():
-				print(iname)
 				# rescue output count
 				output = b_eq[eq_id]
 				# new line, only concern about producing recipes (> 0)
 				# and set all others to zero
-				ex_line = [((output * i) if i > 0 else 0)\
-					for i in _opt.A_T[row_id]]
+				ex_line = [(i if i > 0 else 0) for i in _opt.A_T[row_id]]
 				# original b_eq become 0
 				b_eq[eq_id] = 0
 				# append to A_eq, b_eq
@@ -370,10 +361,10 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 
 
 	def _refine_restrictions(self,
-			param: LinearProgrammingParam,
-			*,
+			old_param: LinearProgrammingParam,
+			optim_goals: _collections_m_.Counter,
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
-			**kw,
+			**optim_args,
 		) -> (bool, LinearProgrammingParam):
 		"""
 		(internal only) dirty codes to refine linear programming parameters
@@ -389,17 +380,16 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		# inputs are ub's
 		_opt = optim_data
 		# in raw A_T, it needs to be < 0
-		c_ids = [i for i in param.c_ids if any(_opt.A_T[i] < 0)]
-		if len(c_ids) == len(param.c_ids):
+		c_ids = [i for i in old_param.c_ids if any(_opt.A_T[i] < 0)]
+		if len(c_ids) == len(old_param.c_ids):
 			return False, None # no refine
-		#print(c_ids)
 		# still, ub_ids is all left behind c_ids and eq_ids
 		# in this case, eq_ids does not need to change
 		ub_ids = [i for i in range(len(_opt.A_T))\
-			if (i not in c_ids) and (i not in param.eq_ids)]
-		#print(ub_ids)
+			if (i not in c_ids) and (i not in old_param.eq_ids)]
 		refined_param = self._finalize_linear_programming_params(
-			c_ids, param.eq_ids, ub_ids,
+			c_ids, old_param.eq_ids, ub_ids,
+			optim_goals = optim_goals,
 			optim_data = optim_data,
-			**kw)
+			**optim_args)
 		return True, refined_param
