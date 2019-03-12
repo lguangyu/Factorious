@@ -27,7 +27,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 	def optimize(self,
 			optim_goals: dict,
 			ignore_trivial: bool = False,
-			scales: dict = {},
+			weights: dict = {},
 			*,
 			tol: float = 1e-6,
 			_show_warnings = False,
@@ -45,7 +45,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 			<is_trivial> flag marks such Items as raw material and disables any
 			optimization over them; see Item for more information;
 
-		scales (dict with signature "item": <float>):
+		weights (dict with signature "item": <float>):
 			defines extra flexible scaling
 			factors applied to correct value coefficient of corresponding Items
 			in the objective function; default value is 1.0 globally;
@@ -89,9 +89,9 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		########################################################################
 		# fetch data
 		optim_data = self.fetch_optimization_data(goals_local.keys())
-		# update scales
-		scales = self._lookup_scales(optim_data.item_names, ignore_trivial,\
-			user_scales = scales, default = 1.0)
+		# update weights
+		weights = self._lookup_weights(optim_data.item_names, ignore_trivial,\
+			user_weights = weights, default = 1.0)
 		while True:
 			# inputs for linear programming
 			# generate param if None
@@ -99,7 +99,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 				param = self._prepare_linear_programming(
 					optim_goals = goals_local,
 					ignore_trivial = ignore_trivial,
-					scales = scales,
+					weights = weights,
 					optim_data = optim_data)
 			# linear programming
 			res = _scipy_m_.linprog(
@@ -145,7 +145,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 					param,
 					optim_goals = goals_local,
 					ignore_trivial = ignore_trivial,
-					scales = scales,
+					weights = weights,
 					optim_data = optim_data)
 				if refine_success:
 					# use refined parameters for another trial
@@ -169,14 +169,14 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		return rexe, rawin, waste
 
 
-	def _lookup_scales(self,
+	def _lookup_weights(self,
 			item_names: list,
 			ignore_trivial: bool = False,
-			user_scales = {},
+			user_weights = {},
 			default = 1.0
 		) -> _collections_m_.defaultdict:
 		"""
-		(internal only) determine the scale coefficient in calculating the
+		(internal only) determine the weight coefficient in calculating the
 		vector c;
 
 		PARAMETERS
@@ -187,16 +187,17 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		ignore_trivial:
 			do not regard trivial flag in items
 
-		user_scales:
-			user definition of scales, overrides all automatic/default values
+		user_weights:
+			user definition of weights, overrides all automatic values
 
 		default:
 			default value if not specified;
 		"""
+		assert not ignore_trivial
 		ret = _collections_m_.defaultdict(lambda : default)
 		for k in item_names:
-			if k in user_scales:
-				ret[k] = user_scales[k]
+			if k in user_weights:
+				ret[k] = user_weights[k]
 			elif (not ignore_trivial) and self.get_item(k).is_trivial():
 				ret[k] = 0.0
 			# no need to deal with other cases
@@ -215,7 +216,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 	def _split_restrictions_sections(self, *,
 			optim_goals: dict,
 			ignore_trivial: bool = False,
-			scales: dict = _collections_m_.defaultdict,
+			weights: dict = _collections_m_.defaultdict,
 			# below are identical to _get_optimizing_coef_matrix output
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
 		) -> LinearProgrammingParam:
@@ -258,7 +259,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 	def _finalize_linear_programming_params(self, c_ids, eq_ids, ub_ids, *,
 			optim_goals: dict,
 			ignore_trivial: bool = False,
-			scales: dict = _collections_m_.defaultdict,
+			weights: dict = {},
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
 		) -> LinearProgrammingParam:
 		"""
@@ -287,8 +288,8 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		b_ub = _scipy_m_.zeros(len(ub_ids), dtype = float)
 		assert len(b_eq) == len(eq_ids), "b_eq shape:" + str(b_eq.shape)
 		########################################################################
-		# c, first find scales (weights) of each item
-		c_coef = [scales[_opt.item_names[i]] for i in c_ids]
+		# c, first find weights of each item
+		c_coef = [weights[_opt.item_names[i]] for i in c_ids]
 		assert len(c_coef) == len(c_ids), "c_coef len:" + str(len(c_coef))
 		# c is the matrix product of c_coef.T * A_c, NOTE: change to minimize
 		# thus multiply by -1

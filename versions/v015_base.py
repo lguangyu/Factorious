@@ -94,7 +94,10 @@ class FactorioTunesDB_v015(stub.FactorioTunesBase):
 			"sulfuric-acid",
 			"water",
 		]
-	
+
+		# default of weight of all fluids used in optimizer
+		self.DEFAULT_FLUID_WEIGHT = 0.1
+
 		# these are item conversions not included in real recipes
 		# missing these may end up with unexpected results
 		self.MADEUP_RECIPES = [

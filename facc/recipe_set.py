@@ -3,6 +3,7 @@
 import collections as _collections_m_
 import warnings as _warnins_m_
 import itertools as _itertools_m_
+from . import abc as _abc_m_
 from . import recipe as _recipe_m_
 from . import item as _item_m_
 from . import text_label_encoder as _text_label_encoder_m_
@@ -13,15 +14,6 @@ from . import scipy_interface as _scipy_m_
 
 class InvalidRecipeSetError(ValueError):
 	pass
-
-
-class _UserDefaultDict(_collections_m_.defaultdict):
-	def __missing__(self, key):
-		if not self.default_factory:
-			super(_UserDefaultDict, self).__missing__(key)
-		else:
-			self[key] = value = self.default_factory(key)
-			return value
 
 
 class RecipeSet(object):
@@ -50,7 +42,7 @@ class RecipeSet(object):
 		# self._recipes is a dict of "recipe_name": Recipe()
 		self._recipes = {}
 		# self._items is a dict of "item_name": Item()
-		self._items = _UserDefaultDict(lambda x: _item_m_.Item(x))
+		self._items = _abc_m_.DefaultValueDict(lambda x: _item_m_.Item(x))
 		# self._recipe_upstr/dwstr are dicts of "recipe_name": "recipe_name"
 		self._recipe_upstr = _collections_m_.defaultdict(set)
 		self._recipe_dwstr = _collections_m_.defaultdict(set)
