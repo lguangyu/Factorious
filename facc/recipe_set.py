@@ -3,15 +3,12 @@
 import collections as _collections_m_
 import warnings as _warnins_m_
 import itertools as _itertools_m_
-import numpy as _numpy_m_
-import scipy as _scipy_m_
-import scipy.optimize
-del scipy # delete entry; use _scipy_m_ instead
 from . import recipe as _recipe_m_
 from . import item as _item_m_
 from . import text_label_encoder as _text_label_encoder_m_
 from . import graph_util as _graph_util_m_
 from . import coef_matrix as _coef_matrix_m_
+from . import scipy_interface as _scipy_m_
 
 
 class InvalidRecipeSetError(ValueError):
@@ -205,14 +202,13 @@ class RecipeSet(object):
 				coef_matrix[ir, all_items.index(iname)] = count
 		# test using linprog
 		A_T = -coef_matrix.T
-		b_ub = _numpy_m_.zeros(n_items, dtype = float)
-		c = _numpy_m_.ones(n_recipes, dtype = float)
+		b_ub = _scipy_m_.zeros(n_items, dtype = float)
+		c = _scipy_m_.ones(n_recipes, dtype = float)
 		x_bounds = [(0, None)] * n_recipes
 		# check linear programming
-		res = _scipy_m_.optimize.\
-			linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
+		res = _scipy_m_.linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
 		assert res.status in [0, 2, 3], res
-		if (res.status == 0) and all(_numpy_m_.isclose(res.x, 0)):
+		if (res.status == 0) and all(_scipy_m_.isclose(res.x, 0)):
 			# good results; the only solution is trivial (all zeros)
 			return True
 		elif res.status == 2:

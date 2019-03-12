@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import itertools as _itertools_m_
-import numpy as _numpy_m_
+from . import scipy_interface as _scipy_m_
 
 
-class UnweightedDirectedGraph(_numpy_m_.ndarray):
+class UnweightedDirectedGraph(_scipy_m_.ndarray):
 	#@staticmethod
 	def __new__(cls,
-			adj: int or _numpy_m_.ndarray,
+			adj: int or _scipy_m_.ndarray,
 		) -> None:
 		"""
 		PARAMETERS
@@ -54,9 +54,9 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 
 	#@staticmethod
 	#def _trim_leaves_and_roots(
-	#		_adj: _numpy_m_.ndarray,
+	#		_adj: _scipy_m_.ndarray,
 	#		copy: bool = True
-	#	) -> _numpy_m_.ndarray:
+	#	) -> _scipy_m_.ndarray:
 	#	"""
 	#	recursively remove leaves and roots in the provided adjacency matrix;
 	#	what remains are only cyclic dependencies;
@@ -76,9 +76,9 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 	#	# in-edge points in-wards to node
 	#	for d, axis in zip(["in", "out"], [0, 1]):
 	#		edge_counts = adj.sum(axis = axis)
-	#		_checked = _numpy_m_.zeros(_size, dtype = bool)
+	#		_checked = _scipy_m_.zeros(_size, dtype = bool)
 	#		while True:
-	#			_leaf_bool = _numpy_m_.logical_and(_checked == False, edge_counts == 0)
+	#			_leaf_bool = _scipy_m_.logical_and(_checked == False, edge_counts == 0)
 	#			if _leaf_bool.any():
 	#				# mark as checked
 	#				_checked[_leaf_bool] = True
@@ -100,8 +100,8 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 
 	#@staticmethod
 	#def _remove_orphans(
-	#		_adj: _numpy_m_.ndarray,
-	#	) -> _numpy_m_.ndarray:
+	#		_adj: _scipy_m_.ndarray,
+	#	) -> _scipy_m_.ndarray:
 	#	"""
 	#	remove all orphan nodes i.e. not connected nodes from the graph
 
@@ -117,12 +117,12 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 	#	mask = _adj.any(axis = 1)
 	#	mask_ids = mask.nonzero()[0]
 	#	# ix_ using mask_ids (much smaller) is thought to be friendly
-	#	return _adj[_numpy_m_.ix_(mask_ids, mask_ids)], mask_ids
+	#	return _adj[_scipy_m_.ix_(mask_ids, mask_ids)], mask_ids
 
 
 	@staticmethod
 	def _extract_cycles(
-			_adj: _numpy_m_.ndarray,
+			_adj: _scipy_m_.ndarray,
 		) -> list:
 		"""
 		extract cycles in given adjacency matrix;
@@ -167,14 +167,14 @@ class UnweightedDirectedGraph(_numpy_m_.ndarray):
 		# this algorithm has time complexity O(N * M), space complexity O(N * M)
 		# where: N=number of nodes, M=avg edges of all nodes
 		cycles = []
-		notyet_visited = _numpy_m_.ones(len(_adj), dtype = bool)
+		notyet_visited = _scipy_m_.ones(len(_adj), dtype = bool)
 		while notyet_visited.any():
 			# operate in a small matrix
 			nyvis_trues = notyet_visited.nonzero()[0]
-			mapback = lambda x: _numpy_m_.take(nyvis_trues, list(x))
+			mapback = lambda x: _scipy_m_.take(nyvis_trues, list(x))
 			# w_adj is the working adjacency matrix that we only interested in
 			# other nodes are masked out
-			w_adj = _adj[_numpy_m_.ix_(nyvis_trues, nyvis_trues)]
+			w_adj = _adj[_scipy_m_.ix_(nyvis_trues, nyvis_trues)]
 			_size = len(w_adj)
 			# initialize
 			# this is used to finally update mask, i.e. nodes are ever visited

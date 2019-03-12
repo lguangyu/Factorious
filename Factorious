@@ -202,7 +202,7 @@ def main():
 	apply_maunal_item_flags(recipe_set,
 		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
 	# towards production calculations
-	prod_tree = ExportableProductionTree(recipe_set, copy = True)
+	prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
 	obj_scales = get_optim_obj_scales(args)
 	# do calculation
 	prod_tree.calculate_targets(args.refined_targets,\

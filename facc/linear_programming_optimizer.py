@@ -2,12 +2,9 @@
 
 import warnings as _warnins_m_
 import collections as _collections_m_
-import numpy as _numpy_m_
-import scipy as _scipy_m_
-import scipy.optimize
-del scipy # remove from name space, go with _scipy_m_
 from . import abc as _abc_m_
 from . import linear_optimizer_base as _linear_optimizer_base_m_
+from . import scipy_interface as _scipy_m_
 
 
 class LinearProgrammingParam(_abc_m_.ProtectedAtrributeHolder):
@@ -86,9 +83,9 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		param = None
 		max_iter = 1000
 		# these are used when infeasible encountered
-		refined_level = 0
+		#refined_level = 0
 		# if still infeasible at refine_max_level, raise error
-		refine_max_level = 1
+		#refine_max_level = 1
 		########################################################################
 		# fetch data
 		optim_data = self.fetch_optimization_data(goals_local.keys())
@@ -105,7 +102,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 					scales = scales,
 					optim_data = optim_data)
 			# linear programming
-			res = _scipy_m_.optimize.linprog(
+			res = _scipy_m_.linprog(
 				param.c,
 				A_ub = param.A_cub,
 				b_ub = param.b_cub,
@@ -124,10 +121,11 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 			#print("in", optim_data.item_names)
 			#print("rn", optim_data.recipe_names)
 			#print("A_eq", param.A_eq)
+			#print("b_eq", param.b_eq)
 			#print("b_ub", param.b_ub)
 			#print("xb", param.x_bounds)
 			#print("x", res.x)
-			#print("yield", _numpy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)))
+			#print("yield", _scipy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)))
 			#print(res.x)
 			# check results
 			if res.status == 0:
@@ -144,13 +142,12 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 				# potential one solution here, refine the restrictions
 				#if refined_level < refine_max_level:
 				refine_success, param = self._refine_restrictions(
-					param, current_level = refined_level,
+					param,
 					optim_goals = goals_local,
 					ignore_trivial = ignore_trivial,
 					scales = scales,
 					optim_data = optim_data)
 				if refine_success:
-					#refined_level = refined_level + 1
 					# use refined parameters for another trial
 					continue
 			# NOTE: if not hit break or continue, will end up here
@@ -159,15 +156,15 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		# summary
 		# recipe execs
 		for k, v in zip(optim_data.recipe_names, res.x):
-			if not _numpy_m_.isclose(v, 0):
+			if not _scipy_m_.isclose(v, 0):
 				rexe.update({k: v})
-		y_prod = _numpy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)).squeeze()
+		y_prod = _scipy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)).squeeze()
 		# raw inputs and wastings
 		for i in param.c_ids:
-			if not _numpy_m_.isclose(y_prod[i], 0):
+			if not _scipy_m_.isclose(y_prod[i], 0):
 				rawin.update({optim_data.item_names[i]: -y_prod[i]})
 		for i in param.ub_ids:
-			if not _numpy_m_.isclose(y_prod[i], 0):
+			if not _scipy_m_.isclose(y_prod[i], 0):
 				waste.update({optim_data.item_names[i]: y_prod[i]})
 		return rexe, rawin, waste
 
@@ -234,7 +231,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		n_recipes = len(_opt.recipe_ids)
 		n_items = len(_opt.item_ids)
 		# boolean 1-d array to indices array
-		bool2index = lambda x: _numpy_m_.nonzero(x)[0]
+		bool2index = lambda x: _scipy_m_.nonzero(x)[0]
 		########################################################################
 		# mask each sub matrix by conditions
 		# c: is the raw inputs, including trivial if not ignored
@@ -243,7 +240,7 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		eq_bool = [i in optim_goals for i in _opt.item_names]
 		# A_ub, b_ub
 		# ub_ids = ids not in eq_ids nor in c_ids
-		ub_bool = _numpy_m_.logical_not(_numpy_m_.logical_or(c_bool, eq_bool))
+		ub_bool = _scipy_m_.logical_not(_scipy_m_.logical_or(c_bool, eq_bool))
 		########################################################################
 		# then bool to ids
 		# though boolean array can also be used to slice matrix, in the summary
@@ -286,8 +283,8 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		########################################################################
 		# b_eq and b_ub
 		b_inames = [_opt.item_names[i] for i in eq_ids]
-		b_eq = _numpy_m_.asarray([optim_goals[i] for i in b_inames], dtype = float)
-		b_ub = _numpy_m_.zeros(len(ub_ids), dtype = float)
+		b_eq = _scipy_m_.asarray([optim_goals[i] for i in b_inames], dtype = float)
+		b_ub = _scipy_m_.zeros(len(ub_ids), dtype = float)
 		assert len(b_eq) == len(eq_ids), "b_eq shape:" + str(b_eq.shape)
 		########################################################################
 		# c, first find scales (weights) of each item
@@ -295,13 +292,17 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		assert len(c_coef) == len(c_ids), "c_coef len:" + str(len(c_coef))
 		# c is the matrix product of c_coef.T * A_c, NOTE: change to minimize
 		# thus multiply by -1
-		c = -_numpy_m_.dot(c_coef, A_c)
+		c = -_scipy_m_.dot(c_coef, A_c)
 		assert c.shape == (_opt.A_T.shape[1], ), "c shape:" + str(c.shape)
 		########################################################################
 		# now also include c related lines lines into ub, I don't want negative
 		# amount of 'inputs'; this does not need to change sign
-		A_cub = _numpy_m_.vstack([A_c, A_ub])
-		b_cub = _numpy_m_.zeros(n_items - len(eq_ids), dtype = float)
+		A_cub = _scipy_m_.vstack([A_c, A_ub])
+		b_cub = _scipy_m_.zeros(n_items - len(eq_ids), dtype = float)
+		########################################################################
+		# apply cyclic optimization
+		A_eq, b_eq = self._apply_cyclic_product_optimizing(eq_ids, A_eq, b_eq,
+			optim_data = _opt)
 		########################################################################
 		# build return value
 		param = LinearProgrammingParam()
@@ -322,12 +323,53 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 
 	@staticmethod
 	def _batch_slice(A_T, *ka):
-		return tuple([_numpy_m_.take(A_T, i, axis = 0) for i in ka])
+		return tuple([_scipy_m_.take(A_T, i, axis = 0) for i in ka])
+
+
+	def _apply_cyclic_product_optimizing(self, eq_ids, A_eq, b_eq, *,
+			#optim_goals: dict,
+			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
+		) -> (_scipy_m_.ndarray, _scipy_m_.ndarray):
+		"""
+		(internal only) the way deal with cyclic products are separate them from
+		the A_eq and b_eq, create new lines that count how many executions are
+		conducted for those producing recipes;
+
+		this is only done when the products are on the optim_goals list;
+		otherwise, this is not needed, reasons are because I have already
+		checked no cycles can be perpetual (in RecipeSet class); thus, if they
+		are not the final product (which will be recycled to cause cyclic
+		dependency), go over another round of the cycle is ensure to be not raw-
+		material benefitial;
+
+		return modified A_eq and b_eq;
+		"""
+		_opt = optim_data
+		A_eq = A_eq.copy()
+		b_eq = b_eq.copy()
+		for eq_id, row_id in enumerate(eq_ids):
+			# eq_id: the id in A_eq and b_eq
+			# row_id: the id in A_T
+			iname = _opt.item_names[row_id]
+			if self.get_item(iname).is_cyclic_product():
+				print(iname)
+				# rescue output count
+				output = b_eq[eq_id]
+				# new line, only concern about producing recipes (> 0)
+				# and set all others to zero
+				ex_line = [((output * i) if i > 0 else 0)\
+					for i in _opt.A_T[row_id]]
+				# original b_eq become 0
+				b_eq[eq_id] = 0
+				# append to A_eq, b_eq
+				A_eq = _scipy_m_.vstack([A_eq, ex_line])
+				b_eq = _scipy_m_.hstack([b_eq, output])
+		assert len(A_eq) == len(b_eq), "len mismatch:" + str([len(A_eq), len(b_eq)])
+		return A_eq, b_eq
 
 
 	def _refine_restrictions(self,
 			param: LinearProgrammingParam,
-			current_level: int,
 			*,
 			optim_data: _linear_optimizer_base_m_.LinearOptimizerAttributeSet,
 			**kw,
@@ -335,26 +377,28 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		"""
 		(internal only) dirty codes to refine linear programming parameters
 		when a previous trial failed
+
+		the second part of this method also uses
+		self._finalize_linear_programming_params
+		as back end
 		"""
-		# level 1 refining, removing items that produced by some recipes but are
-		# locked as input
+		# removing items that produced by some recipes but are locked as input
 		# this potentially cause contradictory restrictions as opposite signs
-		if current_level == 0:
-			# find those items
-			# inputs are ub's
-			_opt = optim_data
-			# in raw A_T, it needs to be < 0
-			c_ids = [i for i in param.c_ids if any(_opt.A_T[i] < 0)]
-			if len(c_ids) == len(param.c_ids):
-				return False, None # no refine
-			#print(c_ids)
-			# still, ub_ids is all left behind c_ids and eq_ids
-			# in this case, eq_ids does not need to change
-			ub_ids = [i for i in range(len(_opt.A_T))\
-				if (i not in c_ids) and (i not in param.eq_ids)]
-			#print(ub_ids)
-			refine_param = self._finalize_linear_programming_params(
-				c_ids, param.eq_ids, ub_ids,
-				optim_data = optim_data,
-				**kw)
-		return True, refine_param
+		# find those items
+		# inputs are ub's
+		_opt = optim_data
+		# in raw A_T, it needs to be < 0
+		c_ids = [i for i in param.c_ids if any(_opt.A_T[i] < 0)]
+		if len(c_ids) == len(param.c_ids):
+			return False, None # no refine
+		#print(c_ids)
+		# still, ub_ids is all left behind c_ids and eq_ids
+		# in this case, eq_ids does not need to change
+		ub_ids = [i for i in range(len(_opt.A_T))\
+			if (i not in c_ids) and (i not in param.eq_ids)]
+		#print(ub_ids)
+		refined_param = self._finalize_linear_programming_params(
+			c_ids, param.eq_ids, ub_ids,
+			optim_data = optim_data,
+			**kw)
+		return True, refined_param
