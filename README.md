@@ -10,6 +10,3 @@ Dependencies
 * Scipy (linear programming back end)
 
 *Python 3.6.0 is required for compatibility of some function notations*
-
-
-

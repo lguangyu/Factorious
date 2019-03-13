@@ -8,7 +8,6 @@ import argparse
 #import textwrap
 import itertools
 import collections
-import graphviz
 #
 import facc
 import versions
@@ -231,34 +230,37 @@ def argsrefine_weights_after_trivial(_args) -> dict:
 ################################################################################
 # main
 def main():
-	args = get_args()
-	# resolving args
-	# load, refining data
-	recp_list = load_raw_recipes(args.FACTORIO.RECIPE_JSON)
-	assert type(recp_list) == list
-	# make RecipeSet
-	append_madeup_recipes_inplace(recp_list, args)
-	assert any([i["name"] == "uranium-fuel-consumption" for i in recp_list])
-	recipe_set = get_recipe_set(recp_list,
-		yield_level = args.yield_level,
-		excluded_recipes = args.refined_excluded_recipes)
-	apply_maunal_item_flags(recipe_set,
-		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
-	# towards production calculations
-	prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
-	# do calculation
-	prod_tree.calculate_targets(args.refined_targets,\
-		optim_args = dict(
-			weights = args.refined_weights.copy(),
-			ignore_trivial = False,
-			no_cyclic = args.disable_cyclic_optimization,
-			tol = args.tolerance)
-	)
-	# output
-	prod_tree.to_tabular(file = sys.stdout,\
-		tune_db = args.FACTORIO, time_unit = args.rate_unit)
-	if args.graph:
-		prod_tree.visualize(file = args.graph)
+	try:
+		args = get_args()
+		# resolving args
+		# load, refining data
+		recp_list = load_raw_recipes(args.FACTORIO.RECIPE_JSON)
+		assert type(recp_list) == list
+		# make RecipeSet
+		append_madeup_recipes_inplace(recp_list, args)
+		recipe_set = get_recipe_set(recp_list,
+			yield_level = args.yield_level,
+			excluded_recipes = args.refined_excluded_recipes)
+		apply_maunal_item_flags(recipe_set,
+			raw_items = args.refined_raws, trivial_items = args.refined_trivials)
+		# towards production calculations
+		prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
+		# do calculation
+		prod_tree.calculate_targets(args.refined_targets,\
+			optim_args = dict(
+				weights = args.refined_weights.copy(),
+				ignore_trivial = False,
+				no_cyclic = args.disable_cyclic_optimization,
+				tol = args.tolerance)
+		)
+		# output
+		prod_tree.to_tabular(file = sys.stdout,\
+			tune_db = args.FACTORIO, time_unit = args.rate_unit)
+		if args.graph:
+			prod_tree.visualize(file = args.graph)
+	except Exception as e:
+		raise e
+		#print("error: " + e.args[0], file = sys.stderr)
 	return
 
 
@@ -359,8 +361,8 @@ class ExportableProductionTree(facc.ProductionTree):
 	def to_tabular_handler(self, fh, tune_db, time_unit, header = "") -> None:
 		category_cfg = tune_db.RECIPE_CATEGORIES
 		crafter_cfg = tune_db.CRAFTERS
-		targ, rexe, raw, wst = self.get_current_tree()
-		cons, prod = self.get_item_summary()
+		targ, rexe, raw, wst = self.get_current_profile()
+		cons, prod = self.get_current_item_summary()
 		########################################################################
 		# header
 		if header:
@@ -436,9 +438,11 @@ class ExportableProductionTree(facc.ProductionTree):
 
 
 	def visualize(self, file: str, title: str = None) -> None:
-		graph = graphviz.Digraph(title)
+		for node in self.get_current_tree():
+			print(node)
+		#graph = graphviz.Digraph(title)
 		#
-		targ, rexe, raw, wst = self.get_current_tree()
+		#targ, rexe, raw, wst = self.get_current_profile()
 		#cons, prod = self.get_item_summary()
 
 		# create nodes

@@ -4,12 +4,12 @@
 import collections as _collections_m_
 
 
-class ProtectedAtrributeHolder(object):
+class ProtectedAttributeHolder(object):
 	"""
 	attribute holder; protected from querying non-existing attributes
 	"""
 	def __init__(self):
-		super(ProtectedAtrributeHolder, self).__init__()
+		super(ProtectedAttributeHolder, self).__init__()
 
 	# override this
 	# make get attribute does not raise error if not find
