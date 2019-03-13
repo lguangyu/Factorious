@@ -3,28 +3,17 @@
 import collections as _collections_m_
 import warnings as _warnins_m_
 import itertools as _itertools_m_
-import numpy as _numpy_m_
-import scipy as _scipy_m_
-import scipy.optimize
-del scipy # delete entry; use _scipy_m_ instead
+from . import abc as _abc_m_
 from . import recipe as _recipe_m_
 from . import item as _item_m_
 from . import text_label_encoder as _text_label_encoder_m_
 from . import graph_util as _graph_util_m_
 from . import coef_matrix as _coef_matrix_m_
+from . import scipy_interface as _scipy_m_
 
 
 class InvalidRecipeSetError(ValueError):
 	pass
-
-
-class _UserDefaultDict(_collections_m_.defaultdict):
-	def __missing__(self, key):
-		if not self.default_factory:
-			super(_UserDefaultDict, self).__missing__(key)
-		else:
-			self[key] = value = self.default_factory(key)
-			return value
 
 
 class RecipeSet(object):
@@ -53,7 +42,7 @@ class RecipeSet(object):
 		# self._recipes is a dict of "recipe_name": Recipe()
 		self._recipes = {}
 		# self._items is a dict of "item_name": Item()
-		self._items = _UserDefaultDict(lambda x: _item_m_.Item(x))
+		self._items = _abc_m_.DefaultValueDict(lambda x: _item_m_.Item(x))
 		# self._recipe_upstr/dwstr are dicts of "recipe_name": "recipe_name"
 		self._recipe_upstr = _collections_m_.defaultdict(set)
 		self._recipe_dwstr = _collections_m_.defaultdict(set)
@@ -205,14 +194,13 @@ class RecipeSet(object):
 				coef_matrix[ir, all_items.index(iname)] = count
 		# test using linprog
 		A_T = -coef_matrix.T
-		b_ub = _numpy_m_.zeros(n_items, dtype = float)
-		c = _numpy_m_.ones(n_recipes, dtype = float)
+		b_ub = _scipy_m_.zeros(n_items, dtype = float)
+		c = _scipy_m_.ones(n_recipes, dtype = float)
 		x_bounds = [(0, None)] * n_recipes
 		# check linear programming
-		res = _scipy_m_.optimize.\
-			linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
+		res = _scipy_m_.linprog(c = c, A_ub = A_T, b_ub = b_ub, bounds = x_bounds)
 		assert res.status in [0, 2, 3], res
-		if (res.status == 0) and all(_numpy_m_.isclose(res.x, 0)):
+		if (res.status == 0) and all(_scipy_m_.isclose(res.x, 0)):
 			# good results; the only solution is trivial (all zeros)
 			return True
 		elif res.status == 2:
@@ -456,6 +444,44 @@ class RecipeSet(object):
 		return self._coef_mat
 
 
+	def get_directly_connected_recipes(self,
+			recipe_name: str,
+			direction: "up" or "down" or "both",
+		) -> dict:
+		"""
+		get a set of names of Recipes which have direct dependency on the query
+		Recipe;
+
+		PARAMETERS
+		----------
+		recipe_name:
+			name of the query Recipe;
+		
+		direction:
+			direction to lookup; "up" gets the prerequites, while "down" fetches
+			towards consumers; "both" does as literal;
+
+		RETURNS
+		-------
+		a set of such Recipes' name;
+
+		EXCEPTIONS
+		----------
+		ValueError: if 'direction' is an unrecognized value;
+		"""
+		if direction == "up":
+			return self._recipe_upstr[recipe_name]
+		elif direction == "down":
+			return self._recipe_dwstr[recipe_name]
+		elif direction == "both":
+			return set.union(\
+				self.get_directly_connected_recipes(recipe_name, "up"),
+				self.get_directly_connected_recipes(recipe_name, "down"))
+		else:
+			raise ValueError("'%s' is not a recognized 'direction' value"\
+				% direction)
+
+
 	def fetch_recipes_in_dependency(self,
 			item_name: str,
 			direction: "up" or "down",
@@ -466,24 +492,22 @@ class RecipeSet(object):
 
 		PARAMETERS
 		----------
-		item:
+		item_name:
 			name of the start item to traverse;
 		
 		direction:
-			direction to traverse; "up" fetches all prerequites, while "down"
+			direction to traverse; "up" gets all prerequites, while "down"
 			fetches towards consumers;
 
 		RETURNS
 		-------
-		a dict in signature "recipe": Recipe
+		a dict in signature "recipe": Recipe;
 		"""
 		if direction == "up":
 			# in stack_init, copy() is necessary
 			stack_init = lambda x: self.get_item(x).product_of.copy()
-			traverse = lambda x: self._recipe_upstr[x]
 		elif direction == "down":
 			stack_init = lambda x: self.get_item(x).input_of.copy()
-			traverse = lambda x: self._recipe_dwstr[x]
 		else:
 			raise ValueError("unrecognized 'direction' value '%s'"\
 				% direction)
@@ -496,7 +520,8 @@ class RecipeSet(object):
 				continue
 			else:
 				ret[rname] = self.get_recipe(rname)
-				stack.update(traverse(rname))
+				stack.update(self.\
+					get_directly_connected_recipes(rname, direction))
 		return ret
 
 
@@ -588,6 +613,10 @@ class RecipeSetEmbed(object):
 
 			def iterate_items(self, *ka, **kw) -> iter:
 				return self._rset_emb_recipe_set.iterate_items(*ka, **kw)
+
+			def get_directly_connected_recipes(self, *ka, **kw) -> set:
+				return self._rset_emb_recipe_set.\
+					get_directly_connected_recipes(*ka, **kw)
 
 			def fetch_recipes_in_dependency(self, *ka, **kw) -> dict:
 				return self._rset_emb_recipe_set.\

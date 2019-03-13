@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 import collections as _collections_m_
-import numpy as _numpy_m_
 from . import abc as _abc_m_
 from . import recipe_set as _recipe_set_m_
+from . import scipy_interface as _scipy_m_
 
 
 class OptimizationInfeasibleError(RuntimeError):
 	pass
 
 
-class LinearOptimizerAttributeSet(_abc_m_.ProtectedAtrributeHolder):
+class LinearOptimizerAttributeSet(_abc_m_.ProtectedAttributeHolder):
 	pass
 
 
@@ -132,7 +132,7 @@ class LinearOptimizerBase(object):
 		#   2. encode into ids
 		item_ids = self.get_item_encoder().encode(item_names)
 		# slice matrix
-		mesh = _numpy_m_.ix_(recipe_ids, item_ids)
+		mesh = _scipy_m_.ix_(recipe_ids, item_ids)
 		coef_matrix = self.get_recipe_set().get_coef_matrix()[mesh]
 		# building return values
 		attr_set = LinearOptimizerAttributeSet()
@@ -150,4 +150,4 @@ class LinearOptimizerBase(object):
 		(internal only) filter count zero targets in the dict; return a copy;
 		"""
 		assert isinstance(goals, dict)
-		return {k: v for k, v in goals.items() if not _numpy_m_.isclose(v, 0)}
+		return {k: v for k, v in goals.items() if not _scipy_m_.isclose(v, 0)}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math as _math_m_
 import collections as _collections_m_
 from . import recipe_set as _recipe_set_m_
 from . import linear_programming_optimizer as _linear_programming_optimizer_m_
@@ -10,9 +11,9 @@ class TargetItemNotFoundError(LookupError):
 
 
 @_recipe_set_m_.RecipeSetEmbed()
-class ProductionTree(object):
+class ProductionProfiler(object):
 	"""
-	solve the production tree using given recipe set;
+	solve the production profile using given recipe set;
 	"""
 	def __init__(self,
 			recipe_set: _recipe_set_m_.RecipeSet,
@@ -65,9 +66,10 @@ class ProductionTree(object):
 		# below is the dicts of items that must be solved using optimizations
 		# format signature is "item": count
 		# these items are optimized in final step
-		# 1. items at multifurcation
-		self._multifurcations = _collections_m_.Counter()
+		# 1. items listed to be resolved using linear programming optimizer
+		self._linprog_resolves = _collections_m_.Counter()
 		# 2. items as product of recipe cycles
+		# CURRENTLY NOT USED
 		self._cyclic_products = _collections_m_.Counter()
 		# below is the raw material input for target
 		# format signature is "item": count
@@ -75,17 +77,17 @@ class ProductionTree(object):
 		# below is the wated material
 		# format signature is "item": count
 		self._wastings = _collections_m_.Counter()
-		self.clear_current_tree()
+		self.clear_current_profile()
 		return
 
 
-	def clear_current_tree(self) -> None:
+	def clear_current_profile(self) -> None:
 		"""
 		clear all cached results for a clean new calculation;
 		"""
 		self._targets.clear()
 		self._recipe_execs.clear()
-		self._multifurcations.clear()
+		self._linprog_resolves.clear()
 		self._cyclic_products.clear()
 		self._raw_inputs.clear()
 		self._wastings.clear()
@@ -113,6 +115,11 @@ class ProductionTree(object):
 		# stack recursion
 		while len(stack):
 			_iname, _icount = stack.pop()
+			# debug only
+			assert not _math_m_.isclose(_icount, 0, abs_tol = 1e-16), _icount
+			# if _icount too small, discard
+			#if _math_m_.isclose(_icount, 0, abs_tol = 1e-16):
+			#	continue
 			# get item instance
 			_item = self.get_item(_iname)
 			if _item.is_raw():
@@ -124,7 +131,7 @@ class ProductionTree(object):
 			#	continue
 			elif _item.is_multifurcation() or _item.is_cyclic_product():
 				# add to _optim_items for later optimization
-				self._multifurcations.update({_iname: _icount})
+				self._linprog_resolves.update({_iname: _icount})
 				continue
 			else:
 				# the item can only be produced in one source
@@ -168,7 +175,7 @@ class ProductionTree(object):
 		TargetItemNotFoundError: if target item is not found in known recipes;
 		"""
 		if not self.has_item(item_name):
-			raise TargetItemNotFoundError("bad item: '%s'" % item_name)
+			raise TargetItemNotFoundError("bad item name: '%s'" % item_name)
 		# add to targets stub
 		self._targets.update({item_name: count})
 		self._recursion_add_targe(item_name, count)
@@ -182,13 +189,13 @@ class ProductionTree(object):
 		"""
 		multi_opt = _linear_programming_optimizer_m_.\
 			LinearProgrammingOptimizer(self.get_recipe_set(), copy = False)
-		op_exec, op_raw, op_wst = multi_opt.optimize(self._multifurcations,
-			**optim_args)
+		op_exec, op_raw, op_wst = multi_opt.optimize(self._linprog_resolves,
+			optim_args)
 		for src, dest in zip([op_exec, op_raw, op_wst],
 			[self._recipe_execs, self._raw_inputs, self._wastings]):
 			for k, v in src.items():
 				dest.update({k: v})
-		self._multifurcations.clear()
+		self._linprog_resolves.clear()
 		return
 
 
@@ -199,7 +206,7 @@ class ProductionTree(object):
 			optim_args = {},
 		) -> tuple:
 		"""
-		set the production targets and construct the production tree; multi-
+		set the production targets and calculate the production profile; multi-
 		source Items are optimized and flushed; return the calculated results in
 		list of dicts;
 
@@ -216,19 +223,20 @@ class ProductionTree(object):
 
 		RETURNS
 		-------
-		see ProductionTree.get_current_tree()
+		see ProductionTree.get_current_profile()
 		"""
 		if clean:
-			self.clear_current_tree()
+			self.clear_current_profile()
 		for p, c in targets.items():
 			self.add_target(str(p), float(c))
 		self.resolve_optimization_items(optim_args)
-		return self.get_current_tree()
+		return self.get_current_profile()
 
 
-	def get_current_tree(self) -> (dict, dict, dict, dict):
+	def get_current_profile(self) -> (dict, dict, dict, dict):
 		"""
-		return all current calculation results;
+		return current calculated profiles of overall target, recipe execution,
+		raw input material and wasted products;
 
 		RETURNS
 		-------
@@ -249,7 +257,7 @@ class ProductionTree(object):
 			self._raw_inputs.copy(), self._wastings.copy())
 
 
-	def get_item_summary(self) -> (dict, dict):
+	def get_current_item_summary(self) -> (dict, dict):
 		"""
 		summary Item produced/consumed according to current recipe executions;
 

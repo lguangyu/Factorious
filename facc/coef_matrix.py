@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-import numpy as _numpy_m_
+from . import scipy_interface as _scipy_m_
 
 
-class CoefficientMatrix(_numpy_m_.ndarray):
+class CoefficientMatrix(_scipy_m_.ndarray):
 	#@staticmethod
 	def __new__(cls, shape) -> None:
 		"""
