@@ -147,7 +147,6 @@ class PTNodeSource(PTNodeRequestable):
 		super(PTNodeSource, self).__init__("item-source")
 		self.item = item
 		self.providing = providing
-		del self.out_connections
 		return
 
 	def __str__(self):
@@ -180,7 +179,6 @@ class PTNodeSink(PTNodeDepositable):
 		super(PTNodeSink, self).__init__("item-sink")
 		self.item = item
 		self.accepting = accepting
-		del self.in_connections
 		return
 
 	def __str__(self):
@@ -223,6 +221,12 @@ class PTNodeFlux(PTNodeRequestable,PTNodeDepositable):
 	def __str__(self):
 		return "<%s uuid=%d flux='%s'>"\
 			% (type(self).__name__, self.uuid(), str(self.flux))
+
+	def update(self, *ka, **kw):
+		"""
+		update flux content, propagates to the attribute Counter;
+		"""
+		return self.flux.update(*ka, **kw)
 
 	# PTNodeFlux does not actually request/deposit
 	# instead it propagates the action to the other end
@@ -475,24 +479,26 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 					found_src = True
 					if _amount > 0.0:
 						# make succesful request as flux
-						fnode = self._get_flux(q_node, node)
-						fnode.flux.update({fname: _amount})
+						self._get_flux(q_node, node).update({fname: _amount})
 						remain = remain - _amount
-					if _math_m_.isclose(remain, 0.0):
+					if _math_m_.isclose(remain, 0.0, abs_tol = 1e-6):
 						break
 				else:
 					# to here means break not called
 					if not found_src:
 						# no source recipe, request from general source
-						src_x.request(fname, fcount)
+						src_node = src_x.request(fname, fcount)
+						self._get_flux(src_node, node).update({fname: fcount})
 					#elif not _math_m_.isclose(remain, 0.0):
 					else:
-						_warning_m_.warn("'%e' not considered 'isclose' to 0")
+						_warning_m_.warn("'%e' not considered 'isclose' to 0"\
+						% remain)
 			# for out deposits, only need to check sinks,
 			# recipe-recipe deposits are repetitive
 			for fname, fcount in node.out_flux.items():
 				found_acp = [q_node.deposit(fname, fcount)[0]\
 					for q_node in recp_nodes]
 				if not any(found_acp):
-					sink_x.deposit(fname, fcount)
+					sink_node = sink_x.deposit(fname, fcount)
+					self._get_flux(node, sink_node).update({fname: fcount})
 		return
