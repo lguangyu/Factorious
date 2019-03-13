@@ -37,8 +37,21 @@ def _stage_argparse_get_factorio_version(argv, namespace):
 	ag.add_argument("-v", "--factorio-version", type = str, metavar = "ver",
 		default = versions.default,
 		help = "use recipe database version (default: %s)" % versions.default)
+	ag.add_argument("--list-versions", action = "store_true",
+		help = "list supported versions and exit")
 	# get args
 	_, unparsed = ap.parse_known_args(argv, namespace)
+	if namespace.list_versions:
+		print("SUPPORTED VERSIONS > %d total" % versions.get_num_registered(),
+			file = sys.stdout)
+		for kl in versions.list_registered():
+			base_key = "[%s]" % kl[0]
+			if len(kl) >= 2:
+				aliases = "  aliases: '" + ("', '").join(kl[1:]) + "'"
+			else:
+				aliases = ""
+			print("%-8s%s" % (base_key, aliases), file = sys.stdout)
+			ap.exit(0)
 	namespace.FACTORIO = versions.get(namespace.factorio_version)
 	return ap, unparsed
 
@@ -116,14 +129,21 @@ def get_args():
 		help = "add a graphic visualization in addition to tabular output")
 	# 
 	ag = ap.add_argument_group("recipe/item options")
+	ag.add_argument("-R", "--without-recipe", type = str,
+		metavar = "recipe1:recipe2:...", default = "",
+		help = "force excluding the recipes on list, separated by colon (:);\
+			if this action breaks the dependencies of some items, those will be\
+			forced as raw material automatically (default: <empty>)")
 	ag.add_argument("-L", "--without-coal-liquefaction", action = "store_true",
-		help = "exclude coal liquefaction recipe (default: off)")
+		help = "exclude coal liquefaction recipe, equivalent to append option\
+		--without-recipe with value 'coal-liquefaction' (default: off)")
 	ag.add_argument("-O", "--without-oil-processing", action = "store_true",
-		help = "exclude both basic and advanced oil processing recipes, tends\
-		to source oil products from coal liquefaction (default: off)")
+		help = "exclude both basic and advanced oil processing recipes,\
+			equivalent to append option --without-recipe with value\
+			'basic-oil-processing:advanced-oil-producing' (default: off)")
 	ag.add_argument("--raw-material", type = str,
-		metavar = "item1,item2,...", default = "",
-		help = "assign listed items, separated by comma (,), to be manually raw\
+		metavar = "item1:item2:...", default = "",
+		help = "assign listed items, separated by colon (:), to be manually raw\
 			material, in addition to those items don't have producing recipes\
 			(a.k.a. naturally raw); raw material is considered as direct\
 			input and will prevent further upstream traversing of the recipe\
@@ -139,11 +159,11 @@ def get_args():
 			object function; higher weight instructs the optimizer to search for\
 			a solution using correspondingly less; the default weight for fluids\
 			is %.2f and 1.0 for all others; explicitly specifying weight values\
-			overrides the trivial flag for assigned items (default <empty>)"\
+			overrides the trivial flag for affected items (default <empty>)"\
 			% ns.FACTORIO.DEFAULT_FLUID_WEIGHT)
 	ag.add_argument("--append-trivial", type = str,
-		metavar = "item1,item2,...", default = "",
-		help = "assign listed items, separated by comma (,), to be manually\
+		metavar = "item1:item2:...", default = "",
+		help = "assign listed items, separated by colon (:), to be manually\
 			trivial in addition to the default list [%s] (if used); trivial\
 			material has all properties of raw material, and additionally are\
 			excluded from optimization on consumption; it is equivalent to set\
@@ -159,7 +179,7 @@ def get_args():
 			recycled after some other processes and reproduce some of its own\
 			ingredients; e.g. in Factorio version 0.15, the only known of such\
 			is 'uranium-fuel-cell'; assign this flag will force disabling the\
-			recycling and craft purely with raw material (default: off)")
+			recycling and craft them purely from raw material (default: off)")
 	# full parsing
 	ap.parse_args(unparsed, ns)
 	# refine args
@@ -208,11 +228,13 @@ def argsrefine_excluded_recipes(_args) -> list:
 	if _args.without_oil_processing:
 		ret.append("basic-oil-processing")
 		ret.append("advanced-oil-processing")
+	if _args.without_recipe:
+		ret += _args.without_recipe.split(":")
 	return ret
 
 
 def argsrefine_trivials(_args) -> set:
-	trivials = filter(bool, _args.append_trivial.split(","))
+	trivials = filter(bool, _args.append_trivial.split(":"))
 	trivials = set(trivials)
 	if not _args.no_default_trivial:
 		trivials.update(_args.FACTORIO.COMMON_TRIVIALS)
@@ -220,7 +242,7 @@ def argsrefine_trivials(_args) -> set:
 
 
 def argsrefine_manual_raws(_args) -> list:
-	return _args.raw_material.split(",")
+	return _args.raw_material.split(":")
 
 
 def argsrefine_weights_after_trivial(_args) -> dict:

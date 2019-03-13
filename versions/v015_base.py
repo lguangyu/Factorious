@@ -4,9 +4,10 @@ import collections
 from . import stub
 
 
-class FactorioTunesDB_v015(stub.FactorioTunesBase):
+@stub.FactorioTunesDatabase("0.15", "0.15.base", "015")
+class FactorioTunesDB_v015(object):
 	def __init__(self, *ka, **kw):
-		super(FactorioTunesDB_v015, self).__init__(*ka, **kw)
+		super(self._wrapped_class_original_, self).__init__(*ka, **kw)
 		self.RECIPE_JSON = "./versions/recipe.0.15.base.json"
 		self.DEFAULT_YIELD_LEVEL = "normal"
 
