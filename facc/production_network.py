@@ -7,7 +7,7 @@ import collections as _collections_m_
 from . import production_profiler as _production_profiler_m_
 
 
-class ProductionTreeNodeBase(object):
+class ProductionNetworkNodeBase(object):
 	# used to allocate uuid to each node at init time
 	_uuid_alloc_next = 0
 
@@ -21,9 +21,9 @@ class ProductionTreeNodeBase(object):
 		return uuid
 
 	def __init__(self, type_str: str = None) -> None:
-		super(ProductionTreeNodeBase, self).__init__()
+		super(ProductionNetworkNodeBase, self).__init__()
 		# use the very base class value
-		self._uuid = ProductionTreeNodeBase._allocate_uuid()
+		self._uuid = ProductionNetworkNodeBase._allocate_uuid()
 		self.type = type_str
 		return
 
@@ -42,9 +42,9 @@ class ProductionTreeNodeBase(object):
 		return
 
 
-class PTNodeRequestable(ProductionTreeNodeBase):
+class PNNodeRequestable(ProductionNetworkNodeBase):
 	def __init__(self, *ka, **kw) -> None:
-		super(PTNodeRequestable, self).__init__(*ka, **kw)
+		super(PNNodeRequestable, self).__init__(*ka, **kw)
 		self._out_pool = _collections_m_.Counter()
 		self.out_connections = []
 		return
@@ -67,26 +67,26 @@ class PTNodeRequestable(ProductionTreeNodeBase):
 		self._out_pool[item_name] = self._out_pool[item_name] - provided
 		return True, provided
 
-	def connect_to(self, target: "PTNodeDepositable"):
-		assert isinstance(target, PTNodeDepositable), type(target)
+	def connect_to(self, target: "PNNodeDepositable"):
+		assert isinstance(target, PNNodeDepositable), type(target)
 		if target not in self.out_connections:
 			self.out_connections.append(target)
 		return
 
-	def connect(self, target: "PTNodeDepositable"):
+	def connect(self, target: "PNNodeDepositable"):
 		"""
 		combined method to call connect_to and connect_from on the identical
 		self->target edge
 		"""
-		assert isinstance(target, PTNodeDepositable), type(target)
+		assert isinstance(target, PNNodeDepositable), type(target)
 		self.connect_to(target)
 		target.connect_from(self)
 		return
 
 
-class PTNodeDepositable(ProductionTreeNodeBase):
+class PNNodeDepositable(ProductionNetworkNodeBase):
 	def __init__(self, *ka, **kw) -> None:
-		super(PTNodeDepositable, self).__init__(*ka, **kw)
+		super(PNNodeDepositable, self).__init__(*ka, **kw)
 		self._depo_pit = _collections_m_.Counter()
 		self.in_connections = []
 		return
@@ -109,14 +109,14 @@ class PTNodeDepositable(ProductionTreeNodeBase):
 		self._depo_pit[item_name] = self._depo_pit[item_name] - deposited
 		return True, deposited
 
-	def connect_from(self, source: "PTNodeRequestable"):
-		assert isinstance(source, PTNodeRequestable), type(source)
+	def connect_from(self, source: "PNNodeRequestable"):
+		assert isinstance(source, PNNodeRequestable), type(source)
 		if source not in self.in_connections:
 			self.in_connections.append(source)
 		return
 
 
-class PTNodeRecipe(PTNodeRequestable,PTNodeDepositable):
+class PNNodeRecipe(PNNodeRequestable,PNNodeDepositable):
 	"""
 	Recipe node;
 	"""
@@ -124,7 +124,7 @@ class PTNodeRecipe(PTNodeRequestable,PTNodeDepositable):
 			in_flux: _collections_m_.Counter = {},
 			out_flux: _collections_m_.Counter = {},
 		) -> None:
-		super(PTNodeRecipe, self).__init__("recipe")
+		super(PNNodeRecipe, self).__init__("recipe")
 		self.name = name
 		self.execs = execs
 		self.in_flux = _collections_m_.Counter(in_flux)
@@ -139,12 +139,12 @@ class PTNodeRecipe(PTNodeRequestable,PTNodeDepositable):
 				str(self.in_flux), str(self.out_flux))
 
 
-class PTNodeSource(PTNodeRequestable):
+class PNNodeSource(PNNodeRequestable):
 	"""
 	requestable node with unlimited source but only provide one Item kind;
 	"""
 	def __init__(self, item: str, providing: float = 0.0) -> None:
-		super(PTNodeSource, self).__init__("item-source")
+		super(PNNodeSource, self).__init__("item-source")
 		self.item = item
 		self.providing = providing
 		return
@@ -171,12 +171,12 @@ class PTNodeSource(PTNodeRequestable):
 		return True, count
 
 
-class PTNodeSink(PTNodeDepositable):
+class PNNodeSink(PNNodeDepositable):
 	"""
 	depositable node with unlimited pit but only accept one Item kind;
 	"""
 	def __init__(self, item: str, accepting: float = 0.0) -> None:
-		super(PTNodeSink, self).__init__("item-sink")
+		super(PNNodeSink, self).__init__("item-sink")
 		self.item = item
 		self.accepting = accepting
 		return
@@ -204,12 +204,12 @@ class PTNodeSink(PTNodeDepositable):
 		return True, count
 
 
-class PTNodeFlux(PTNodeRequestable,PTNodeDepositable):
+class PNNodeFlux(PNNodeRequestable,PNNodeDepositable):
 	"""
 	flux node is connectors between nodes;
 	"""
 	def __init__(self, flux: _collections_m_.Counter = {}) -> None:
-		super(PTNodeFlux, self).__init__("flux")
+		super(PNNodeFlux, self).__init__("flux")
 		# ensure type
 		self.flux = _collections_m_.Counter(flux)
 		self.src_node = None
@@ -228,7 +228,7 @@ class PTNodeFlux(PTNodeRequestable,PTNodeDepositable):
 		"""
 		return self.flux.update(*ka, **kw)
 
-	# PTNodeFlux does not actually request/deposit
+	# PNNodeFlux does not actually request/deposit
 	# instead it propagates the action to the other end
 	# this maybe dangerous to create an infinit loop
 	def request(self, item_name, count) -> (bool, float):
@@ -241,15 +241,15 @@ class PTNodeFlux(PTNodeRequestable,PTNodeDepositable):
 			return False, 0.0
 		return self.dest_node.deposit(item_name, count)
 
-	def connect_to(self, target: PTNodeDepositable) -> None:
-		assert isinstance(target, PTNodeDepositable), type(target)
+	def connect_to(self, target: PNNodeDepositable) -> None:
+		assert isinstance(target, PNNodeDepositable), type(target)
 		if self.dest_node is not None:
 			_warning_m_.warn("'%s' relink target node to '%s'" % (self, target))
 		self.dest_node = target
 		return
 
-	def connect_from(self, source: PTNodeRequestable) -> None:
-		assert isinstance(source, PTNodeRequestable), type(source)
+	def connect_from(self, source: PNNodeRequestable) -> None:
+		assert isinstance(source, PNNodeRequestable), type(source)
 		if self.src_node is not None:
 			_warning_m_.warn("'%s' relink source node to '%s'" % (self, source))
 		self.src_node = source
@@ -260,21 +260,21 @@ class GeneralSourceComplex(dict):
 	"""
 	a collection of sources, with unified interface;
 	"""
-	def __init__(self, tree_parent, *ka, **kw):
+	def __init__(self, parent, *ka, **kw):
 		super(GeneralSourceComplex, self).__init__(*ka, **kw)
-		self._tree_parent = tree_parent
-		# get all sinks from parent tree
-		self.update({s.item: s for s in self._tree_parent.iterate_nodes()\
-			if isinstance(s, PTNodeSource)})
+		self._parent = parent
+		# get all sinks from parent network
+		self.update({s.item: s for s in self._parent.iterate_nodes()\
+			if isinstance(s, PNNodeSource)})
 		return
 
-	def request(self, item_name, count) -> PTNodeSource:
+	def request(self, item_name, count) -> PNNodeSource:
 		"""
 		request from this complex, returns the eventually requested source;
 		if the node does not exist, create one;
 		"""
 		if item_name not in self:
-			src = self._tree_parent.create_node(PTNodeSource, item_name, 0.0)
+			src = self._parent.create_node(PNNodeSource, item_name, 0.0)
 			self[item_name] = src
 		else:
 			src = self[item_name]
@@ -287,21 +287,21 @@ class GeneralSinkComplex(dict):
 	"""
 	a collection of sinks, with unified interface;
 	"""
-	def __init__(self, tree_parent, *ka, **kw):
+	def __init__(self, parent, *ka, **kw):
 		super(GeneralSinkComplex, self).__init__(*ka, **kw)
-		self._tree_parent = tree_parent
-		# get all sinks from parent tree
-		self.update({s.item: s for s in self._tree_parent.iterate_nodes()\
-			if isinstance(s, PTNodeSink)})
+		self._parent = parent
+		# get all sinks from parent network
+		self.update({s.item: s for s in self._parent.iterate_nodes()\
+			if isinstance(s, PNNodeSink)})
 		return
 
-	def deposit(self, item_name, count) -> PTNodeSink:
+	def deposit(self, item_name, count) -> PNNodeSink:
 		"""
 		deposit to this complex, returns the eventually deposited sink;
 		if the node does not exist, create one;
 		"""
 		if item_name not in self:
-			sink = self._tree_parent.create_node(PTNodeSink, item_name, 0.0)
+			sink = self._parent.create_node(PNNodeSink, item_name, 0.0)
 			self[item_name] = sink
 		else:
 			sink = self[item_name]
@@ -310,9 +310,9 @@ class GeneralSinkComplex(dict):
 		return sink
 
 
-class ProductionTree(_production_profiler_m_.ProductionProfiler):
+class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 	"""
-	tree constructor over production profiling results; this is a closed class,
+	network constructor over production profiling results; this is a closed class,
 	means only very few arguments are requested from outside input; thus most
 	of the parameters are not type-checked (only used assert which is debug-
 	only);
@@ -323,21 +323,21 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		----------
 		see production_profiler.ProductionProfiler for detailed information;
 		"""
-		super(ProductionTree, self).__init__(*ka, **kw)
+		super(ProductionNetwork, self).__init__(*ka, **kw)
 		# a list of all current nodes
-		self._tree_nodes_list = []
+		self._nodes_recruited = []
 		return
 
 
-	def get_current_tree(self, force_construct: bool = True) -> list:
+	def get_current_network(self, force_construct: bool = True) -> list:
 		"""
-		return a list of interconnected nodes as a tree, based on the calculated
+		return a list of interconnected nodes as a network, based on the calculated
 		profiling results;
 
 		PARAMETERS
 		----------
 		force_construct:
-			if False, will directly return the previously constructed tree (if
+			if False, will directly return the previously constructed network (if
 			have) no matter whether changes were made after last construction,
 			otherwise construct from scratch; if True, the construction will be
 			forced;
@@ -345,55 +345,55 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		RETURNS
 		-------
 		node_list:
-			a list of tree nodes;
+			a list of network nodes;
 		"""
-		if (not len(self._tree_nodes_list)) or force_construct:
-			self.clear_current_tree()
-			self.construct_tree()
+		if (not len(self._nodes_recruited)) or force_construct:
+			self.clear_current_network()
+			self.construct_network()
 		# only use shallow copy below
-		return self._tree_nodes_list.copy()
+		return self._nodes_recruited.copy()
 
 
-	def clear_current_tree(self) -> None:
+	def clear_current_network(self) -> None:
 		"""
-		clear current constructed tree nodes
+		clear current constructed network nodes
 		"""
-		self._tree_nodes_list.clear()
+		self._nodes_recruited.clear()
 		return
 
 
 	def create_node(self,
 			node_type: type,
 			*ka, **kw,
-		) -> ProductionTreeNodeBase:
+		) -> ProductionNetworkNodeBase:
 		"""
 		create and return a new node instance of given type, also adding it to
-		the tree's nodes tracking list;
+		the network's nodes tracking list;
 
 		PARAMETERS
 		----------
 		node_type:
-			type of the constructed node (subclass of ProductionTreeNodeBase);
+			type of the constructed node (subclass of ProductionNetworkNodeBase);
 
 		*ka, **kw:
 			extra parameter sent to the node's constructor;
 		"""
-		assert issubclass(node_type, ProductionTreeNodeBase), node_type
+		assert issubclass(node_type, ProductionNetworkNodeBase), node_type
 		node = node_type(*ka, **kw)
-		self._tree_nodes_list.append(node)
+		self._nodes_recruited.append(node)
 		return node
 
 
 	def iterate_nodes(self) -> iter:
 		"""
-		return an iterator to the nodes list in this tree;
+		return an iterator to the nodes list in this network;
 		"""
-		return iter(self._tree_nodes_list)
+		return iter(self._nodes_recruited)
 
 
-	def construct_tree(self) -> None:
+	def construct_network(self) -> None:
 		"""
-		construct the tree from scratch based on current profile;
+		construct the network from scratch based on current profile;
 		"""
 		self._create_recipe_nodes()
 		self._resolve_flux()
@@ -410,8 +410,8 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		for r, ex in rexe.items():
 			# get recipe information
 			recipe = self.get_recipe(r)
-			# create node, add to tree
-			rnode = self.create_node(PTNodeRecipe, name = r, execs = ex,
+			# create node, add to network
+			rnode = self.create_node(PNNodeRecipe, name = r, execs = ex,
 				in_flux = _collections_m_.Counter({k: v * ex\
 					for (k, v) in recipe.inputs.items()}),
 				out_flux = _collections_m_.Counter({k: v * ex\
@@ -421,33 +421,33 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 
 
 	def _connect_with_flux(self,
-			src_node: PTNodeRequestable,
-			dest_node: PTNodeDepositable,
-		) -> PTNodeFlux:
+			src_node: PNNodeRequestable,
+			dest_node: PNNodeDepositable,
+		) -> PNNodeFlux:
 		"""
 		(internal only) connect two nodes, with creating a new flux node in\
 		between;
 		"""
-		assert isinstance(src_node, PTNodeRequestable), type(src_node)
-		assert isinstance(dest_node, PTNodeDepositable), type(dest_node)
-		fnode = self.create_node(PTNodeFlux)
+		assert isinstance(src_node, PNNodeRequestable), type(src_node)
+		assert isinstance(dest_node, PNNodeDepositable), type(dest_node)
+		fnode = self.create_node(PNNodeFlux)
 		src_node.connect(fnode)
 		fnode.connect(dest_node)
 		return fnode
 
 
 	def _get_flux(self,
-			src_node: PTNodeRequestable,
-			dest_node: PTNodeDepositable,
-		) -> PTNodeFlux:
+			src_node: PNNodeRequestable,
+			dest_node: PNNodeDepositable,
+		) -> PNNodeFlux:
 		"""
 		(internal only) search for the existing flux of src_node->dest_node;
 		if so, return the flux; else create one and return that;
 		"""
-		assert isinstance(src_node, PTNodeRequestable), type(src_node)
-		assert isinstance(dest_node, PTNodeDepositable), type(dest_node)
+		assert isinstance(src_node, PNNodeRequestable), type(src_node)
+		assert isinstance(dest_node, PNNodeDepositable), type(dest_node)
 		for flux in src_node.out_connections:
-			if isinstance(flux, PTNodeFlux) and (flux.dest_node is dest_node):
+			if isinstance(flux, PNNodeFlux) and (flux.dest_node is dest_node):
 				return flux
 		# create one
 		return self._connect_with_flux(src_node, dest_node)
@@ -458,10 +458,10 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		(internal only) resolve Item flux using constructed Recipe nodes;
 		"""
 		# terminal item nodes dicts
-		src_x = GeneralSourceComplex(tree_parent = self)
-		sink_x = GeneralSinkComplex(tree_parent = self)
+		src_x = GeneralSourceComplex(parent = self)
+		sink_x = GeneralSinkComplex(parent = self)
 		recp_nodes = [i for i in self.iterate_nodes()\
-			if isinstance(i, PTNodeRecipe)]
+			if isinstance(i, PNNodeRecipe)]
 		for node in recp_nodes:
 			# resolve is done by requesting mode, i.e. downstream nodes
 			# request resources from its uptreams
