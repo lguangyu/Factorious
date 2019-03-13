@@ -10,7 +10,7 @@ class OptimizationInfeasibleError(RuntimeError):
 	pass
 
 
-class LinearOptimizerAttributeSet(_abc_m_.ProtectedAtrributeHolder):
+class LinearOptimizerAttributeSet(_abc_m_.ProtectedAttributeHolder):
 	pass
 
 

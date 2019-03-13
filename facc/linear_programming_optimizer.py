@@ -7,7 +7,7 @@ from . import linear_optimizer_base as _linear_optimizer_base_m_
 from . import scipy_interface as _scipy_m_
 
 
-class LinearProgrammingParam(_abc_m_.ProtectedAtrributeHolder):
+class LinearProgrammingParam(_abc_m_.ProtectedAttributeHolder):
 	"""
 	attribute holder for linear programming input
 	"""

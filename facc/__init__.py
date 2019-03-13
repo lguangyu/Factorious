@@ -11,8 +11,10 @@ from .recipe import InvalidRecipeError,\
 from .recipe_set import InvalidRecipeSetError,\
 	RecipeSet, RecipeSetEmbed
 #
-from .production_tree import TargetItemNotFoundError,\
-	ProductionTree
+from .production_profiler import TargetItemNotFoundError,\
+	ProductionProfiler
+#
+from .production_tree import ProductionTree
 #
 from .linear_optimizer_base import OptimizationInfeasibleError
 from .linear_programming_optimizer import LinearProgrammingOptimizer
