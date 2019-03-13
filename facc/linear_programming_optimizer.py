@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math as _math_m_
 import warnings as _warnins_m_
 import collections as _collections_m_
 from . import abc as _abc_m_
@@ -157,15 +158,15 @@ class LinearProgrammingOptimizer(_linear_optimizer_base_m_.LinearOptimizerBase):
 		# summary
 		# recipe execs
 		for k, v in zip(optim_data.recipe_names, res.x):
-			if not _scipy_m_.isclose(v, 0):
+			if not _math_m_.isclose(v, 0, abs_tol = 1e-8):
 				rexe.update({k: v})
 		y_prod = _scipy_m_.dot(optim_data.A_T, res.x.reshape(-1, 1)).squeeze()
 		# raw inputs and wastings
 		for i in param.c_ids:
-			if not _scipy_m_.isclose(y_prod[i], 0):
+			if not _math_m_.isclose(y_prod[i], 0, abs_tol = 1e-8):
 				rawin.update({optim_data.item_names[i]: -y_prod[i]})
 		for i in param.ub_ids:
-			if not _scipy_m_.isclose(y_prod[i], 0):
+			if not _math_m_.isclose(y_prod[i], 0, abs_tol = 1e-8):
 				waste.update({optim_data.item_names[i]: y_prod[i]})
 		return rexe, rawin, waste
 

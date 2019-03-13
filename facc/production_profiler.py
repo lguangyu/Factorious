@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math as _math_m_
 import collections as _collections_m_
 from . import recipe_set as _recipe_set_m_
 from . import linear_programming_optimizer as _linear_programming_optimizer_m_
@@ -114,6 +115,11 @@ class ProductionProfiler(object):
 		# stack recursion
 		while len(stack):
 			_iname, _icount = stack.pop()
+			# debug only
+			assert not _math_m_.isclose(_icount, 0, abs_tol = 1e-16), _icount
+			# if _icount too small, discard
+			#if _math_m_.isclose(_icount, 0, abs_tol = 1e-16):
+			#	continue
 			# get item instance
 			_item = self.get_item(_iname)
 			if _item.is_raw():

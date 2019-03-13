@@ -8,6 +8,7 @@ import argparse
 #import textwrap
 import itertools
 import collections
+import warnings
 #
 import facc
 import versions
@@ -111,7 +112,7 @@ def get_args():
 	ag.add_argument("-u", "--rate-unit", type = str,
 		choices = ["sec", "min", "hr"], default = "min",
 		help = "assume <targets> production in per <unit> rate (default: min)")
-	ag.add_argument("-g", "--graph", type = str, metavar = "gv",
+	ag.add_argument("-g", "--graph", type = str, metavar = "png",
 		help = "add a graphic visualization in addition to tabular output")
 	# 
 	ag = ap.add_argument_group("recipe/item options")
@@ -190,7 +191,14 @@ def argsrefine_parse_targets(_args) -> dict:
 		ts = sys.stdin.read().splitlines()
 	else:
 		ts = _args.targets.split(":")
-	return dict([parse_item_key_value_pair(t) for t in ts if t])
+	targets = dict([parse_item_key_value_pair(t) for t in ts if t])
+	if any([(math.isclose(v, 0, abs_tol = 1e-6) or v > 1e12) and v != 0\
+		for v in targets.values()]):
+		raise ValueError("setting target count(s) very large/small is rude")
+	if all([v == 0 for v in targets.values()]):
+		print("nothing to calculate", file = sys.stderr)
+		exit(0)
+	return targets
 
 
 def argsrefine_excluded_recipes(_args) -> list:
@@ -230,37 +238,37 @@ def argsrefine_weights_after_trivial(_args) -> dict:
 ################################################################################
 # main
 def main():
-	try:
-		args = get_args()
-		# resolving args
-		# load, refining data
-		recp_list = load_raw_recipes(args.FACTORIO.RECIPE_JSON)
-		assert type(recp_list) == list
-		# make RecipeSet
-		append_madeup_recipes_inplace(recp_list, args)
-		recipe_set = get_recipe_set(recp_list,
-			yield_level = args.yield_level,
-			excluded_recipes = args.refined_excluded_recipes)
-		apply_maunal_item_flags(recipe_set,
-			raw_items = args.refined_raws, trivial_items = args.refined_trivials)
-		# towards production calculations
-		prod_tree = ExportableProductionTree(recipe_set)#, copy = True)
-		# do calculation
-		prod_tree.calculate_targets(args.refined_targets,\
-			optim_args = dict(
-				weights = args.refined_weights.copy(),
-				ignore_trivial = False,
-				no_cyclic = args.disable_cyclic_optimization,
-				tol = args.tolerance)
-		)
-		# output
-		prod_tree.to_tabular(file = sys.stdout,\
-			tune_db = args.FACTORIO, time_unit = args.rate_unit)
-		if args.graph:
-			prod_tree.visualize(file = args.graph)
-	except Exception as e:
-		raise e
-		#print("error: " + e.args[0], file = sys.stderr)
+	#try:
+	args = get_args()
+	# resolving args
+	# load, refining data
+	recp_list = load_raw_recipes(args.FACTORIO.RECIPE_JSON)
+	assert type(recp_list) == list
+	# make RecipeSet
+	append_madeup_recipes_inplace(recp_list, args)
+	recipe_set = get_recipe_set(recp_list,
+		yield_level = args.yield_level,
+		excluded_recipes = args.refined_excluded_recipes)
+	apply_maunal_item_flags(recipe_set,
+		raw_items = args.refined_raws, trivial_items = args.refined_trivials)
+	# towards production calculations
+	prod_network = ExportableProductionNetwork(recipe_set)#, copy = True)
+	# do calculation
+	prod_network.calculate_targets(args.refined_targets,\
+		optim_args = dict(
+			weights = args.refined_weights.copy(),
+			ignore_trivial = False,
+			no_cyclic = args.disable_cyclic_optimization,
+			tol = args.tolerance)
+	)
+	# output
+	prod_network.to_tabular(file = sys.stdout,\
+		tune_db = args.FACTORIO, time_unit = args.rate_unit)
+	if args.graph:
+		prod_network.visualize(png = args.graph)
+	#except Exception as e:
+	#	raise e
+	#	#print("error: " + e.args[0], file = sys.stderr)
 	return
 
 
@@ -321,31 +329,43 @@ def apply_maunal_item_flags(recipe_set,
 
 ################################################################################
 # output
-def _fmt_float(v, len_lim = 7, strip_int = False):
-	low_lim = math.pow(10, max(3 - len_lim, -4))
-	high_lim = math.pow(10, len_lim + 1)
-	_abs_v = abs(v)
-	_int_v = int(round(v))
-	if (_abs_v < low_lim) or (_abs_v >= high_lim):
-		_format = "%%.%de" % min(len_lim - 6, 3)
-	elif strip_int and math.isclose(v, _int_v) and _int_v >= 10:
-		return str(_int_v)
-	elif _abs_v < 0.01:
-		_format = "%%.%df" % min(len_lim - 2, 4)
-	elif _abs_v < 0.1:
-		_format = "%%.%df" % min(len_lim - 3, 3)
-	elif _abs_v < 2:
-		_format = "%%.%df" % min(len_lim - 4, 2)
-	#elif _abs_v < 10:
-	#	_format = "%%.%df" % min(len_lim - 5, 2)
-	elif _abs_v < 100:
-		_format = "%%.%df" % min(len_lim - 5, 1)
-	else:
-		return "%d" % v
-	return _format % v
-	
+class ExportableProductionNetwork(facc.ProductionNetwork):
+	@staticmethod
+	def _fmt_float(value, keep_int = False, use_prefix = True):
+		assert isinstance(keep_int, bool)
+		assert isinstance(use_prefix, bool)
+		high_lim = 1e12 if (keep_int or use_prefix) else 1e7
+		_abs_v = abs(value)
+		_int_v = int(round(value))
+		if (_abs_v < 1e-4) or (_abs_v >= high_lim):
+			_format = "%.1e"
+		elif keep_int and math.isclose(value, _int_v):
+			return str(_int_v)
+		elif _abs_v < 0.01:
+			_format = "%.4f"
+		elif _abs_v < 0.1:
+			_format = "%.4f"
+		elif _abs_v < 1:
+			_format = "%.3f"
+		elif _abs_v < 10:
+			_format = "%.2f"
+		elif _abs_v < 100:
+			_format = "%.1f"
+		elif _abs_v < 1e3:
+			_format = "%d"
+		elif _abs_v < 1e6 and use_prefix:
+			return ExportableProductionNetwork.\
+				_fmt_float(value / 1e3) + "k"
+		elif _abs_v < 1e9 and use_prefix:
+			return ExportableProductionNetwork.\
+				_fmt_float(value / 1e6) + "M"
+		elif use_prefix:
+			return ExportableProductionNetwork.\
+				_fmt_float(value / 1e9) + "G"
+		else:
+			_format = "%d"
+		return _format % value
 
-class ExportableProductionTree(facc.ProductionTree):
 	def to_tabular(self, file: io.IOBase or str, *ka, **kw) -> None:
 		if isinstance(file, str):
 			with open(file, "w") as fh:
@@ -378,7 +398,7 @@ class ExportableProductionTree(facc.ProductionTree):
 		else:
 			for i, k in enumerate(sorted(targ.keys())):
 				print(dataline_fmt.format(i + 1, k,\
-					_fmt_float(targ[k]) + " /" + time_unit), file = fh)
+					self._fmt_float(targ[k]) + " /" + time_unit), file = fh)
 		print("", file = fh)
 		########################################################################
 		# recipe exec
@@ -401,11 +421,11 @@ class ExportableProductionTree(facc.ProductionTree):
 				_std = _exe * _recp.craft_time / TIME_TO_SEC[time_unit]
 				# each field format is defined above
 				_exu = [_exu_fmt.format(c[:_exu_w - 9], "[%s]"\
-						% _fmt_float(_std / crafter_cfg[c]["speed"])\
-					) for c in category_cfg[_recp.category]]
+						% self._fmt_float(_std / crafter_cfg[c]["speed"]))\
+						for c in category_cfg[_recp.category]]
 				_exu = " | ".join([("{:^%d}" % _exu_w).format(i) for i in _exu])
-				print(dataline_fmt.format(i + 1, k, _fmt_float(_exe, 12, True),\
-					_fmt_float(_std, 12, True), _exu), file = fh)
+				print(dataline_fmt.format(i + 1, k, self._fmt_float(_exe),\
+					self._fmt_float(_std), _exu), file = fh)
 		print("", file = fh)
 		########################################################################
 		# item consumption/production/wasting
@@ -430,16 +450,26 @@ class ExportableProductionTree(facc.ProductionTree):
 				for i, (k, c) in enumerate(sorted_descend):
 					r = c / TIME_TO_SEC[time_unit] # per second
 					print(dataline_fmt.format(i + 1, k,\
-						*[_fmt_float(r * TIME_TO_SEC[u], 13)
+						*[self._fmt_float(r * TIME_TO_SEC[u])
 							for u in TIME_UNITS]),
 						file = fh)
 			print("", file = fh)
 		return
 
 
-	def visualize(self, file: str, title: str = None) -> None:
+	@staticmethod
+	def _get_node_label(node):
+		assert isinstance(node, facc.production_network.ProductionNetworkNodeBase),\
+			type(node)
+		return node.type
+
+
+
+	def visualize(self, png: str, title: str = None) -> None:
 		# lazy load
+		#import pygraphviz
 		import graphviz
+		G = pygraphviz.AGraph(directed = True)
 		dot = graphviz.Digraph(title)
 		# plot style
 		node_color_table = {
@@ -448,15 +478,16 @@ class ExportableProductionTree(facc.ProductionTree):
 			"item-sink": "#ffd7ce",
 		}
 		# make searchable using uuid
-		tree_nodes = {i.uuid(): i for i in self.get_current_tree()}
+		network_nodes = {i.uuid(): i for i in self.get_current_network()}
 		# create nodes
-		for node in filter(lambda x: (x.type != "flux"), tree_nodes.values()):
-			dot.node(str(node.uuid()), node.type,
+		for node in filter(lambda x: (x.type != "flux"), network_nodes.values()):
+			dot.node(str(node.uuid()), self._get_node_label(node),
 				shape = "doublecircle", fontsize = "20", style = "filled",
 				color = node_color_table[node.type])
 		# create flux
-		for flux in filter(lambda x: (x.type == "flux"), tree_nodes.values()):
+		for flux in filter(lambda x: (x.type == "flux"), network_nodes.values()):
 			dot.edge(str(flux.src_node.uuid()), str(flux.dest_node.uuid()),
+				label = self._get_node_label(node),
 				penwidth = "4.0", dir = "forward", arrowhead = "normal")
 		dot.render(file, format = "png")
 		return

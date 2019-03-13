@@ -14,7 +14,7 @@ from .recipe_set import InvalidRecipeSetError,\
 from .production_profiler import TargetItemNotFoundError,\
 	ProductionProfiler
 #
-from .production_tree import ProductionTree
+from .production_network import ProductionNetwork
 #
 from .linear_optimizer_base import OptimizationInfeasibleError
 from .linear_programming_optimizer import LinearProgrammingOptimizer
