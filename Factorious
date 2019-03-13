@@ -438,15 +438,27 @@ class ExportableProductionTree(facc.ProductionTree):
 
 
 	def visualize(self, file: str, title: str = None) -> None:
-		for node in self.get_current_tree():
-			print(node)
-		#graph = graphviz.Digraph(title)
-		#
-		#targ, rexe, raw, wst = self.get_current_profile()
-		#cons, prod = self.get_item_summary()
-
+		# lazy load
+		import graphviz
+		dot = graphviz.Digraph(title)
+		# plot style
+		node_color_table = {
+			"recipe": "#d9f2f7",
+			"item-source": "#dcf4ce",
+			"item-sink": "#ffd7ce",
+		}
+		# make searchable using uuid
+		tree_nodes = {i.uuid(): i for i in self.get_current_tree()}
 		# create nodes
-		# TODO: colors of each nodes
+		for node in filter(lambda x: (x.type != "flux"), tree_nodes.values()):
+			dot.node(str(node.uuid()), node.type,
+				shape = "doublecircle", fontsize = "20", style = "filled",
+				color = node_color_table[node.type])
+		# create flux
+		for flux in filter(lambda x: (x.type == "flux"), tree_nodes.values()):
+			dot.edge(str(flux.src_node.uuid()), str(flux.dest_node.uuid()),
+				penwidth = "4.0", dir = "forward", arrowhead = "normal")
+		dot.render(file, format = "png")
 		return
 
 
