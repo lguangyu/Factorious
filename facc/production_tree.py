@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import math as _math_m_
+import warnings as _warning_m_
+import itertools as _itertools_m_
 import collections as _collections_m_
 from . import production_profiler as _production_profiler_m_
 
@@ -17,23 +20,12 @@ class ProductionTreeNodeBase(object):
 		cls._uuid_alloc_next = int(cls._uuid_alloc_next + 1)
 		return uuid
 
-
 	def __init__(self, type_str: str = None) -> None:
 		super(ProductionTreeNodeBase, self).__init__()
-		self._uuid = self._allocate_uuid()
+		# use the very base class value
+		self._uuid = ProductionTreeNodeBase._allocate_uuid()
 		self.type = type_str
-		self.in_connections = []
-		self.out_connections = []
 		return
-
-
-	def __str__(self):
-		return "<%s type='%s'>" % type(self).__name__
-
-
-	def __repr__(self):
-		return str(self)
-
 
 	def uuid(self) -> int:
 		"""
@@ -41,108 +33,285 @@ class ProductionTreeNodeBase(object):
 		"""
 		return self._uuid
 
+	def connect_to(self, target) -> None:
+		raise NotImplementedError()
+		return
 
-	def connect(self, target: "ProductionTreeNodeBase") -> None:
-		"""
-		connect to another node;
-
-		PARAMETERS
-		----------
-		target:
-			a target node;
-
-		EXCEPTIONS
-		----------
-		TypeError if 'target' is not of type 'ProductionTreeNodeBase'
-		"""
-		if not isinstance(self, ProductionTreeNodeBase):
-			raise TypeError("'target' must be of type 'ProductionTree'")
-		if target in self.out_connections:
-			return
-		self.out_connections.append(target)
-		target.in_connections.append(self)
+	def connect_from(self, source) -> None:
+		raise NotImplementedError()
 		return
 
 
-class PT_RecipeNode(ProductionTreeNodeBase):
+class PTNodeRequestable(ProductionTreeNodeBase):
+	def __init__(self, *ka, **kw) -> None:
+		super(PTNodeRequestable, self).__init__(*ka, **kw)
+		self._out_pool = _collections_m_.Counter()
+		self.out_connections = []
+		return
+
+	def request(self, item_name, count) -> (bool, float):
+		"""
+		make request from its <_out_pool>;
+		
+		RETURNS
+		-------
+		found_item:
+			True if <item_name> found in <_out_pool>, regardless if insufficient;
+
+		provided:
+			provided amount;
+		"""
+		if item_name not in self._out_pool:
+			return False, 0.0
+		provided = min(self._out_pool[item_name], count)
+		self._out_pool[item_name] = self._out_pool[item_name] - provided
+		return True, provided
+
+	def connect_to(self, target: "PTNodeDepositable"):
+		assert isinstance(target, PTNodeDepositable), type(target)
+		if target not in self.out_connections:
+			self.out_connections.append(target)
+		return
+
+	def connect(self, target: "PTNodeDepositable"):
+		"""
+		combined method to call connect_to and connect_from on the identical
+		self->target edge
+		"""
+		assert isinstance(target, PTNodeDepositable), type(target)
+		self.connect_to(target)
+		target.connect_from(self)
+		return
+
+
+class PTNodeDepositable(ProductionTreeNodeBase):
+	def __init__(self, *ka, **kw) -> None:
+		super(PTNodeDepositable, self).__init__(*ka, **kw)
+		self._depo_pit = _collections_m_.Counter()
+		self.in_connections = []
+		return
+
+	def deposit(self, item_name, count) -> (bool, float):
+		"""
+		make deposit to its <_depo_pit>;
+		
+		RETURNS
+		-------
+		found_item:
+			True if <item_name> found in <_depo_pit>, regardless if insufficient;
+
+		deposited:
+			deposited amount;
+		"""
+		if item_name not in self._depo_pit:
+			return False, 0.0
+		deposited = min(self._depo_pit[item_name], count)
+		self._depo_pit[item_name] = self._depo_pit[item_name] - deposited
+		return True, deposited
+
+	def connect_from(self, source: "PTNodeRequestable"):
+		assert isinstance(source, PTNodeRequestable), type(source)
+		if source not in self.in_connections:
+			self.in_connections.append(source)
+		return
+
+
+class PTNodeRecipe(PTNodeRequestable,PTNodeDepositable):
+	"""
+	Recipe node;
+	"""
 	def __init__(self, name: str, execs: float,
 			in_flux: _collections_m_.Counter = {},
 			out_flux: _collections_m_.Counter = {},
 		) -> None:
-		super(PT_RecipeNode, self).__init__("recipe")
+		super(PTNodeRecipe, self).__init__("recipe")
 		self.name = name
 		self.execs = execs
 		self.in_flux = _collections_m_.Counter(in_flux)
 		self.out_flux = _collections_m_.Counter(out_flux)
+		self._out_pool = self.out_flux.copy()
+		self._depo_pit = self.in_flux.copy()
 		return
 
 	def __str__(self):
-		return "<%s name='%s' exec='%f' in_flux='%s' out_flux='%s'>"\
-			% (type(self).__name__, self.name, self.execs,\
+		return "<%s uuid=%d name='%s' exec='%f' in_flux='%s' out_flux='%s'>"\
+			% (type(self).__name__, self.uuid(), self.name, self.execs,\
 				str(self.in_flux), str(self.out_flux))
 
-	def has_in_flux(self, item_name: str) -> bool:
-		"""
-		return True if this node has an in flux named 'item_name'
-		"""
-		return item_name in self.in_flux
 
-	def has_out_flux(self, item_name: str) -> bool:
-		"""
-		return True if this node has an out flux named 'item_name'
-		"""
-		return item_name in self.out_flux
-
-
-class PT_ItemSourceNode(ProductionTreeNodeBase):
-	def __init__(self, item: str, count: float = 0.0) -> None:
-		super(PT_ItemSourceNode, self).__init__("item-source")
+class PTNodeSource(PTNodeRequestable):
+	"""
+	requestable node with unlimited source but only provide one Item kind;
+	"""
+	def __init__(self, item: str, providing: float = 0.0) -> None:
+		super(PTNodeSource, self).__init__("item-source")
 		self.item = item
-		self.count = count
+		self.providing = providing
+		del self.out_connections
 		return
 
 	def __str__(self):
-		return "<%s item='%s' count='%f'>"\
-			% (type(self).__name__, self.item, self.count)
+		return "<%s uuid=%d item='%s' providing='%f'>"\
+			% (type(self).__name__, self.uuid(), self.item, self.providing)
+
+	def request(self, item_name, count) -> (bool, float):
+		"""
+		make request;
+		
+		RETURNS
+		-------
+		match:
+			True if matches the providing;
+
+		provided:
+			always equal to <count> if <found_item> is True;
+		"""
+		if item_name != self.item:
+			return False, 0.0
+		self.providing = self.providing + count
+		return True, count
 
 
-class PT_ItemSinkNode(ProductionTreeNodeBase):
-	def __init__(self, item: str, count: float = 0.0) -> None:
-		super(PT_ItemSinkNode, self).__init__("item-sink")
+class PTNodeSink(PTNodeDepositable):
+	"""
+	depositable node with unlimited pit but only accept one Item kind;
+	"""
+	def __init__(self, item: str, accepting: float = 0.0) -> None:
+		super(PTNodeSink, self).__init__("item-sink")
 		self.item = item
-		self.count = count
+		self.accepting = accepting
+		del self.in_connections
 		return
 
 	def __str__(self):
-		return "<%s item='%s' count='%f'>"\
-			% (type(self).__name__, self.item, self.count)
+		return "<%s uuid=%d item='%s' accepting='%f'>"\
+			% (type(self).__name__, self.uuid(), self.item, self.accepting)
+
+	# overrided function
+	def deposit(self, item_name, count) -> (bool, float):
+		"""
+		make deposite;
+		
+		RETURNS
+		-------
+		match:
+			True if matches the accepting;
+
+		accepting:
+			always equal to <count> if <found_item> is True;
+		"""
+		if item_name != self.item:
+			return False, 0.0
+		self.accepting = self.accepting + count
+		return True, count
 
 
-class PT_FluxNode(ProductionTreeNodeBase):
-	def __init__(self,
-			flux: _collections_m_.Counter = {},
-		) -> None:
-		super(PT_FluxNode, self).__init__("flux")
+class PTNodeFlux(PTNodeRequestable,PTNodeDepositable):
+	"""
+	flux node is connectors between nodes;
+	"""
+	def __init__(self, flux: _collections_m_.Counter = {}) -> None:
+		super(PTNodeFlux, self).__init__("flux")
 		# ensure type
 		self.flux = _collections_m_.Counter(flux)
+		self.src_node = None
+		self.dest_node = None
+		del self.in_connections
+		del self.out_connections
 		return
 
 	def __str__(self):
-		return "<%s flux='%s'>"\
-			% (type(self).__name__, str(self.flux))
+		return "<%s uuid=%d flux='%s'>"\
+			% (type(self).__name__, self.uuid(), str(self.flux))
 
-	# now since flux node has only one source and destination,
-	# below two methods makes sence
-	def get_src_node(self) -> bool:
-		return self.in_connections[0]
+	# PTNodeFlux does not actually request/deposit
+	# instead it propagates the action to the other end
+	# this maybe dangerous to create an infinit loop
+	def request(self, item_name, count) -> (bool, float):
+		if self.src_node is None:
+			return False, 0.0
+		return self.src_node.request(item_name, count)
 
-	def get_dest_node(self) -> bool:
-		return self.out_connections[0]
+	def deposit(self, item_name, count) -> (bool, float):
+		if self.dest_node is None:
+			return False, 0.0
+		return self.dest_node.deposit(item_name, count)
+
+	def connect_to(self, target: PTNodeDepositable) -> None:
+		assert isinstance(target, PTNodeDepositable), type(target)
+		if self.dest_node is not None:
+			_warning_m_.warn("'%s' relink target node to '%s'" % (self, target))
+		self.dest_node = target
+		return
+
+	def connect_from(self, source: PTNodeRequestable) -> None:
+		assert isinstance(source, PTNodeRequestable), type(source)
+		if self.src_node is not None:
+			_warning_m_.warn("'%s' relink source node to '%s'" % (self, source))
+		self.src_node = source
+		return
+
+
+class GeneralSourceComplex(dict):
+	"""
+	a collection of sources, with unified interface;
+	"""
+	def __init__(self, tree_parent, *ka, **kw):
+		super(GeneralSourceComplex, self).__init__(*ka, **kw)
+		self._tree_parent = tree_parent
+		# get all sinks from parent tree
+		self.update({s.item: s for s in self._tree_parent.iterate_nodes()\
+			if isinstance(s, PTNodeSource)})
+		return
+
+	def request(self, item_name, count) -> PTNodeSource:
+		"""
+		request from this complex, returns the eventually requested source;
+		if the node does not exist, create one;
+		"""
+		if item_name not in self:
+			src = self._tree_parent.create_node(PTNodeSource, item_name, 0.0)
+			self[item_name] = src
+		else:
+			src = self[item_name]
+		assert src.item == item_name, src.item_name + "|" + item_name
+		src.request(item_name, count)
+		return src
+
+
+class GeneralSinkComplex(dict):
+	"""
+	a collection of sinks, with unified interface;
+	"""
+	def __init__(self, tree_parent, *ka, **kw):
+		super(GeneralSinkComplex, self).__init__(*ka, **kw)
+		self._tree_parent = tree_parent
+		# get all sinks from parent tree
+		self.update({s.item: s for s in self._tree_parent.iterate_nodes()\
+			if isinstance(s, PTNodeSink)})
+		return
+
+	def deposit(self, item_name, count) -> PTNodeSink:
+		"""
+		deposit to this complex, returns the eventually deposited sink;
+		if the node does not exist, create one;
+		"""
+		if item_name not in self:
+			sink = self._tree_parent.create_node(PTNodeSink, item_name, 0.0)
+			self[item_name] = sink
+		else:
+			sink = self[item_name]
+		assert sink.item == item_name, sink.item_name + "|" + item_name
+		sink.deposit(item_name, count)
+		return sink
 
 
 class ProductionTree(_production_profiler_m_.ProductionProfiler):
 	"""
-	tree constructor over production profiling results;
+	tree constructor over production profiling results; this is a closed class,
+	means only very few arguments are requested from outside input; thus most
+	of the parameters are not type-checked (only used assert which is debug-
+	only);
 	"""
 	def __init__(self, *ka, **kw) -> None:
 		"""
@@ -152,7 +321,6 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		"""
 		super(ProductionTree, self).__init__(*ka, **kw)
 		# a list of all current nodes
-		self._uuid_alloc_next = int(0)
 		self._tree_nodes_list = []
 		return
 
@@ -190,220 +358,141 @@ class ProductionTree(_production_profiler_m_.ProductionProfiler):
 		return
 
 
-	def _new_node(self,
+	def create_node(self,
 			node_type: type,
 			*ka, **kw,
 		) -> ProductionTreeNodeBase:
 		"""
-		(internal only) return a new node of given note type, also adding it to
-		the tree's tracking node list;
+		create and return a new node instance of given type, also adding it to
+		the tree's nodes tracking list;
 
-		EXCEPTIONS
+		PARAMETERS
 		----------
-		ValueError: if 'node_type' is not a subclass of 'ProductionTreeNodeBase'
+		node_type:
+			type of the constructed node (subclass of ProductionTreeNodeBase);
+
+		*ka, **kw:
+			extra parameter sent to the node's constructor;
 		"""
-		if not issubclass(node_type, ProductionTreeNodeBase):
-			raise ValueError("'node_type' must be a subclass of\
-				'ProductionTreeNodeBase'")
+		assert issubclass(node_type, ProductionTreeNodeBase), node_type
 		node = node_type(*ka, **kw)
 		self._tree_nodes_list.append(node)
 		return node
+
+
+	def iterate_nodes(self) -> iter:
+		"""
+		return an iterator to the nodes list in this tree;
+		"""
+		return iter(self._tree_nodes_list)
 
 
 	def construct_tree(self) -> None:
 		"""
 		construct the tree from scratch based on current profile;
 		"""
-		recp_nodes = self._create_and_link_recipe_nodes()
-		self._resolve_flux(recp_nodes)
+		self._create_recipe_nodes()
+		self._resolve_flux()
 		pass
 
 
-	def _create_and_link_recipe_nodes(self) -> dict:
+	def _create_recipe_nodes(self) -> None:
 		"""
 		(internal only) create a dict of nodes that represents the calculated
-		Recipe profile, including all the dependencies;
-
-		RETURNS
-		-------
-		dict (in signature of "recipe": ProductionTreeNodeBase):
-			the dict of all Recipe nodes; each node includes the exec count and
-			in/out Item flux as attributes;
+		Recipe profile;
 		"""
-		node_dict = {}
 		_, rexe, _, _ = self.get_current_profile()
 		# first, create nodes
 		for r, ex in rexe.items():
 			# get recipe information
 			recipe = self.get_recipe(r)
 			# create node, add to tree
-			rnode = self._new_node(PT_RecipeNode, name = r, execs = ex,
+			rnode = self.create_node(PTNodeRecipe, name = r, execs = ex,
 				in_flux = _collections_m_.Counter({k: v * ex\
 					for (k, v) in recipe.inputs.items()}),
 				out_flux = _collections_m_.Counter({k: v * ex\
 					for (k, v) in recipe.products.items()})
 			)
-			# 
-			node_dict[r] = rnode
-		# second, make connections
-		for r, rnode in node_dict.items():
-			# get recipe information
-			# create connection, one way is enough
-			for dc in self.get_directly_connected_recipes(r, "down"):
-				if dc in node_dict:
-					self._connect_flux(rnode, node_dict[dc])
-		return node_dict
+		return
 
 
-	def _connect_flux(self,
-			src_node: ProductionTreeNodeBase,
-			dest_node: ProductionTreeNodeBase,
-		) -> ProductionTreeNodeBase:
+	def _connect_with_flux(self,
+			src_node: PTNodeRequestable,
+			dest_node: PTNodeDepositable,
+		) -> PTNodeFlux:
 		"""
-		(internal only) connect two nodes, inserting a new flux node in between;
-
-		EXCEPTIONS
-		----------
-		TypeError: if either argument are not of type 'ProductionTreeNodeBase';
+		(internal only) connect two nodes, with creating a new flux node in\
+		between;
 		"""
-		if (not isinstance(src_node, ProductionTreeNodeBase)) or\
-			(not isinstance(dest_node, ProductionTreeNodeBase)):
-			raise TypeError("both nodes must be of type 'ProductionTreeNodeBase'")
-		fnode = self._new_node(PT_FluxNode)
+		assert isinstance(src_node, PTNodeRequestable), type(src_node)
+		assert isinstance(dest_node, PTNodeDepositable), type(dest_node)
+		fnode = self.create_node(PTNodeFlux)
 		src_node.connect(fnode)
 		fnode.connect(dest_node)
 		return fnode
 
 
-	def _resolve_flux(self, recp_nodes):
+	def _get_flux(self,
+			src_node: PTNodeRequestable,
+			dest_node: PTNodeDepositable,
+		) -> PTNodeFlux:
+		"""
+		(internal only) search for the existing flux of src_node->dest_node;
+		if so, return the flux; else create one and return that;
+		"""
+		assert isinstance(src_node, PTNodeRequestable), type(src_node)
+		assert isinstance(dest_node, PTNodeDepositable), type(dest_node)
+		for flux in src_node.out_connections:
+			if isinstance(flux, PTNodeFlux) and (flux.dest_node is dest_node):
+				return flux
+		# create one
+		return self._connect_with_flux(src_node, dest_node)
+
+
+	def _resolve_flux(self):
 		"""
 		(internal only) resolve Item flux using constructed Recipe nodes;
 		"""
 		# terminal item nodes dicts
-		sources = {}
-		sinks = {}
-		for node in recp_nodes.values():
+		src_x = GeneralSourceComplex(tree_parent = self)
+		sink_x = GeneralSinkComplex(tree_parent = self)
+		recp_nodes = [i for i in self.iterate_nodes()\
+			if isinstance(i, PTNodeRecipe)]
+		for node in recp_nodes:
 			# resolve is done by requesting mode, i.e. downstream nodes
 			# request resources from its uptreams
 			for fname, fcount in node.in_flux.items():
-				providers = self._list_flux_provider(node, fname)
-				if not providers:
-					self._add_terminal_node_flux("source",
-						sources, node, fname, fcount)
+				# this flag var is necessary
+				# for ... break ... else does not work here
+				found_src = False
+				remain = fcount
+				for q_node in recp_nodes:
+					#if node is src_node:
+					#	continue
+					_found, _amount = q_node.request(fname, remain)
+					if not _found:
+						continue
+					found_src = True
+					if _amount > 0.0:
+						# make succesful request as flux
+						fnode = self._get_flux(q_node, node)
+						fnode.flux.update({fname: _amount})
+						remain = remain - _amount
+					if _math_m_.isclose(remain, 0.0):
+						break
 				else:
-					# TODO: figure out this and tree is done
-					pass
+					# to here means break not called
+					if not found_src:
+						# no source recipe, request from general source
+						src_x.request(fname, fcount)
+					#elif not _math_m_.isclose(remain, 0.0):
+					else:
+						_warning_m_.warn("'%e' not considered 'isclose' to 0")
+			# for out deposits, only need to check sinks,
+			# recipe-recipe deposits are repetitive
 			for fname, fcount in node.out_flux.items():
-				requesters = self._list_flux_requester(node, fname)
-				# no need to do if have requesters
-				# that's repeatative with providers
-				if not requesters:
-					self._add_terminal_node_flux("sink",
-						sinks, node, fname, fcount)
+				found_acp = [q_node.deposit(fname, fcount)[0]\
+					for q_node in recp_nodes]
+				if not any(found_acp):
+					sink_x.deposit(fname, fcount)
 		return
-
-
-	def _list_flux_provider(self, query_node, item_name):
-		"""
-		return a list of PT_RecipeNode's, which connects directly to the query
-		node, and has an out flux of <item_name>;
-		"""
-		ret = []
-		for flux in query_node.in_connections:
-			s_node = flux.get_src_node()
-			if isinstance(s_node, PT_RecipeNode)\
-				and s_node.has_out_flux(item_name):
-				ret.append(s_node)
-		return ret
-
-
-	def _list_flux_requester(self, query_node, item_name):
-		"""
-		return a list of PT_RecipeNode's, which connects directly to the query
-		node, and has an out flux of <item_name>;
-		"""
-		ret = []
-		for flux in query_node.out_connections:
-			s_node = flux.get_dest_node()
-			if isinstance(s_node, PT_RecipeNode)\
-				and s_node.has_in_flux(item_name):
-				ret.append(s_node)
-		return ret
-
-
-	def _add_terminal_node_flux(self,
-			mode: str,
-			node_dict: dict,
-			query_node: ProductionTreeNodeBase,
-			flux_item: str,
-			flux_count: float,
-		) -> None:
-		"""
-		add a source/sink node, with a <flux> connects to the 'req_node';
-		"""
-		# check value
-		if mode == "source":
-			node_type = PT_ItemSourceNode
-		elif mode == "sink":
-			node_type = PT_ItemSinkNode
-		else:
-			raise ValueError("'mode' must be either 'source' or 'sink'")
-		# create node if not exists
-		# not use setdefault since _new_node is called
-		if flux_item not in node_dict:
-			inode = self._new_node(node_type, item = flux_item, count = 0.0)
-			node_dict[flux_item] = inode
-		else:
-			inode = node_dict[flux_item]
-		assert inode.item == flux_item
-		# update
-		inode.count = inode.count + flux_count
-		# connect to the query_node
-		if mode == "source":
-			fnode = self._connect_flux(inode, query_node)
-		elif mode == "sink":
-			fnode = self._connect_flux(query_node, inode)
-		fnode.flux.update({flux_item: flux_count})
-		return
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
