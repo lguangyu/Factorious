@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
-from .stub import FactorioTunesDBKeyExistsError,\
-	FactorioTunesBase, FactorioTunesStub
+from .stub import FactorioTunesDBKeyExistsError, FactorioTunesStub
 
-from .v015_base import FactorioTunesDB_v015
+from . import v015_base
 
 
 # initialize
 _STUB = FactorioTunesStub()
-_STUB.register(FactorioTunesDB_v015)
+_STUB.register(v015_base.FactorioTunesDB_v015)
 # set default version
 default = "0.15"
 

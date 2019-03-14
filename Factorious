@@ -44,14 +44,14 @@ def _stage_argparse_get_factorio_version(argv, namespace):
 	if namespace.list_versions:
 		print("SUPPORTED VERSIONS > %d total" % versions.get_num_registered(),
 			file = sys.stdout)
-		for kl in versions.list_registered():
-			base_key = "[%s]" % kl[0]
+		for i, kl in enumerate(versions.list_registered()):
+			base_key = "'%s'" % kl[0]
 			if len(kl) >= 2:
-				aliases = "  aliases: '" + ("', '").join(kl[1:]) + "'"
+				aliases = "  [aliases: '" + ("', '").join(kl[1:]) + "']"
 			else:
 				aliases = ""
-			print("%-8s%s" % (base_key, aliases), file = sys.stdout)
-			ap.exit(0)
+			print("% 2d.  %-8s%s" % (i + 1, base_key, aliases), file = sys.stdout)
+		ap.exit(0)
 	namespace.FACTORIO = versions.get(namespace.factorio_version)
 	return ap, unparsed
 
@@ -85,7 +85,8 @@ def print_items_and_recipes(_args) -> None:
 			(_args.list_recipes, "RECIPES >> %s", recipe_set.iterate_recipes()),
 		]:
 		if _do:
-			h = _header % _args.FACTORIO.RECIPE_JSON
+			json_f = _args.FACTORIO.RECIPE_JSON
+			h = _header % (json_f if json_f else "no data")
 			print("_" * len(h), file = fh)
 			print(h, file = fh)
 			for i in sorted(_iter):
@@ -298,6 +299,8 @@ def main():
 ################################################################################
 # load recipes
 def load_raw_recipes(json_f: str) -> list:
+	if not json_f:
+		return []
 	with open(json_f, "r") as fh:
 		rs = json.load(fh)
 	# ensure list
@@ -517,4 +520,7 @@ class ExportableProductionNetwork(facc.ProductionNetwork):
 
 ################################################################################
 if __name__ == "__main__":
-	main()
+	try:
+		main()
+	except Exception as e:
+		print("error:", str(e), file = sys.stderr)

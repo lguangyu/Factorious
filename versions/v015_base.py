@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 import collections
-from . import stub
+from . import db_base
 
 
-@stub.FactorioTunesDatabase("0.15", "0.15.base", "015")
+@db_base.AsFactorioTunesDatabase("0.15", "0.15.base", "015")
 class FactorioTunesDB_v015(object):
 	def __init__(self, *ka, **kw):
 		super(self._wrapped_class_original_, self).__init__(*ka, **kw)
