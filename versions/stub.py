@@ -1,20 +1,7 @@
 #!/usr/bin/env python3
 
-import os
-import collections as _collections_m_
-
-
-class FactorioTunesBase(object):
-	# namespace use
-	# an attribute-index safe
-	def __init__(self, *ka, **kw):
-		super(FactorioTunesBase, self).__init__()
-		return
-
-	@staticmethod
-	def dirname(self, path):
-		return os.path.dirname(path)
-
+import collections
+from . import db_base
 
 
 class FactorioTunesDBKeyExistsError(RuntimeError):
@@ -22,41 +9,41 @@ class FactorioTunesDBKeyExistsError(RuntimeError):
 
 
 class FactorioTunesStub(object):
+	"""
+	stub database of version databases;
+	"""
 	def __init__(self):
 		super(FactorioTunesStub, self).__init__()
-		self._tune_dbs = dict()
+		self._db_keyref = dict()
 		return
 
 
 	def register(self,
-			tune_db: FactorioTunesBase,
-			*version_keys: str,
+			tunedb_t: db_base.AsFactorioTunesDatabase.DB_Base,
 		) -> None:
 		"""
-		register a <tune_db> with its search key;
+		register a <tunedb_t> with its search key;
 
 		PARAMETERS
-		----------
-		tune_db:
+		tunedb_t:
 			a derived FactorioTunesBase type class tuned for the Factorio
-			versions;
-
-		version_keys:
-			string (and aliases) associated with this db;
+			version;
 
 		EXCEPTIONS
-		----------
-		TypeError: if tune_db is not a <class> of FactorioTunesBase
+		TypeError: if tunedb_t is not a <class> of FactorioTunesBase;
 		FactorioTunesDBKeyExistsError: if try to register a database with
 			existing key;
 		"""
-		if not issubclass(tune_db, FactorioTunesBase):
-			raise TypeError("'tune_db' must be a subclass of FactorioTunesBase")
-		for k in version_keys:
-			if k in self._tune_dbs:
-				raise FactorioTunesDBKeyExistsError("key '%s' already exists"\
-					% k)
-			self._tune_dbs[k] = tune_db
+		if not issubclass(tunedb_t, db_base.AsFactorioTunesDatabase.DB_Base):
+			raise TypeError("'tunedb_t' must be a decorated by\
+				'AsFactorioTunesDatabase'")
+		_keys = tunedb_t.get_stub_keys()
+		for k in _keys:
+			if k in self._db_keyref:
+				raise FactorioTunesDBKeyExistsError("key '%s' already in use" % k)
+		# add key search dict
+		for k in _keys:
+			self._db_keyref[k] = tunedb_t
 		return
 
 
@@ -65,14 +52,28 @@ class FactorioTunesStub(object):
 		fetch an instance of the tune database class associated with given key
 
 		PARAMETERS
-		----------
 		version_key:
 			the searching key;
-
 		*ka, **kw:
 			other arguments passed to the tunes db initializer;
 		"""
-		if version_key not in self._tune_dbs:
+		if version_key not in self._db_keyref:
 			raise LookupError("version '%s' is not found in database"\
 				% version_key)
-		return self._tune_dbs[version_key](*ka, **kw)
+		return self._db_keyref[version_key](*ka, **kw)
+
+
+	def get_num_registered(self) -> int:
+		"""
+		get number of registered tune databases;
+		"""
+		return len(set(self._db_keyref.values()))
+
+
+	def list_registered(self) -> list:
+		"""
+		return a list of keys to registered tune databases;
+		"""
+		rkeys = [db_t.get_stub_keys() for db_t in set(self._db_keyref.values())]
+		rkeys.sort(key = lambda x: x[0])
+		return rkeys

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import collections
-from . import stub
+from . import db_base
 
 
-class FactorioTunesDB_v015(stub.FactorioTunesBase):
+@db_base.AsFactorioTunesDatabase("0.15", "0.15.base", "015")
+class FactorioTunesDB_v015(object):
 	def __init__(self, *ka, **kw):
-		super(FactorioTunesDB_v015, self).__init__(*ka, **kw)
+		super(self.strip_decoration(), self).__init__(*ka, **kw)
 		self.RECIPE_JSON = "./versions/recipe.0.15.base.json"
 		self.DEFAULT_YIELD_LEVEL = "normal"
 

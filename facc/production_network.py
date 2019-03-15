@@ -43,9 +43,9 @@ class ProductionNetworkNodeBase(object):
 
 
 class PNNodeRequestable(ProductionNetworkNodeBase):
-	def __init__(self, *ka, **kw) -> None:
+	def __init__(self, *ka, output_total = {}, **kw) -> None:
 		super(PNNodeRequestable, self).__init__(*ka, **kw)
-		self._out_pool = _collections_m_.Counter()
+		self._out_pool = _collections_m_.Counter(output_total)
 		self.out_connections = []
 		return
 
@@ -54,10 +54,8 @@ class PNNodeRequestable(ProductionNetworkNodeBase):
 		make request from its <_out_pool>;
 		
 		RETURNS
-		-------
 		found_item:
 			True if <item_name> found in <_out_pool>, regardless if insufficient;
-
 		provided:
 			provided amount;
 		"""
@@ -85,9 +83,9 @@ class PNNodeRequestable(ProductionNetworkNodeBase):
 
 
 class PNNodeDepositable(ProductionNetworkNodeBase):
-	def __init__(self, *ka, **kw) -> None:
+	def __init__(self, *ka, input_total = {}, **kw) -> None:
 		super(PNNodeDepositable, self).__init__(*ka, **kw)
-		self._depo_pit = _collections_m_.Counter()
+		self._depo_pit = _collections_m_.Counter(input_total)
 		self.in_connections = []
 		return
 
@@ -96,10 +94,8 @@ class PNNodeDepositable(ProductionNetworkNodeBase):
 		make deposit to its <_depo_pit>;
 		
 		RETURNS
-		-------
 		found_item:
 			True if <item_name> found in <_depo_pit>, regardless if insufficient;
-
 		deposited:
 			deposited amount;
 		"""
@@ -124,13 +120,13 @@ class PNNodeRecipe(PNNodeRequestable,PNNodeDepositable):
 			in_flux: _collections_m_.Counter = {},
 			out_flux: _collections_m_.Counter = {},
 		) -> None:
-		super(PNNodeRecipe, self).__init__("recipe")
+		super(PNNodeRecipe, self).__init__("recipe",\
+			input_total = in_flux,
+			output_total = out_flux)
 		self.name = name
 		self.execs = execs
 		self.in_flux = _collections_m_.Counter(in_flux)
 		self.out_flux = _collections_m_.Counter(out_flux)
-		self._out_pool = self.out_flux.copy()
-		self._depo_pit = self.in_flux.copy()
 		return
 
 	def __str__(self):
@@ -158,10 +154,8 @@ class PNNodeSource(PNNodeRequestable):
 		make request;
 		
 		RETURNS
-		-------
 		match:
 			True if matches the providing;
-
 		provided:
 			always equal to <count> if <found_item> is True;
 		"""
@@ -191,10 +185,8 @@ class PNNodeSink(PNNodeDepositable):
 		make deposite;
 		
 		RETURNS
-		-------
 		match:
 			True if matches the accepting;
-
 		accepting:
 			always equal to <count> if <found_item> is True;
 		"""
@@ -214,6 +206,9 @@ class PNNodeFlux(PNNodeRequestable,PNNodeDepositable):
 		self.flux = _collections_m_.Counter(flux)
 		self.src_node = None
 		self.dest_node = None
+		# flux class does not need them
+		del self._out_pool
+		del self._depo_pit
 		del self.in_connections
 		del self.out_connections
 		return
@@ -234,12 +229,18 @@ class PNNodeFlux(PNNodeRequestable,PNNodeDepositable):
 	def request(self, item_name, count) -> (bool, float):
 		if self.src_node is None:
 			return False, 0.0
-		return self.src_node.request(item_name, count)
+		success, amount = self.src_node.request(item_name, count)
+		if success and (amount > 0):
+			self.update({item_name, amount})
+		return success, amount
 
 	def deposit(self, item_name, count) -> (bool, float):
 		if self.dest_node is None:
 			return False, 0.0
-		return self.dest_node.deposit(item_name, count)
+		success, amount = self.dest_node.deposit(item_name, count)
+		if success and (amount > 0):
+			self.update({item_name, amount})
+		return success, amount
 
 	def connect_to(self, target: PNNodeDepositable) -> None:
 		assert isinstance(target, PNNodeDepositable), type(target)
@@ -320,7 +321,6 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 	def __init__(self, *ka, **kw) -> None:
 		"""
 		PARAMETERS
-		----------
 		see production_profiler.ProductionProfiler for detailed information;
 		"""
 		super(ProductionNetwork, self).__init__(*ka, **kw)
@@ -335,7 +335,6 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 		profiling results;
 
 		PARAMETERS
-		----------
 		force_construct:
 			if False, will directly return the previously constructed network (if
 			have) no matter whether changes were made after last construction,
@@ -343,7 +342,6 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 			forced;
 
 		RETURNS
-		-------
 		node_list:
 			a list of network nodes;
 		"""
@@ -371,10 +369,8 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 		the network's nodes tracking list;
 
 		PARAMETERS
-		----------
 		node_type:
 			type of the constructed node (subclass of ProductionNetworkNodeBase);
-
 		*ka, **kw:
 			extra parameter sent to the node's constructor;
 		"""

@@ -17,9 +17,9 @@ Description
 
 ### What this calculator can do:
 
-This is a `back end` of calculators, which means it mostly solves the tedious
-calculations but only has a simple (and ugly) input and visualization front end.
-The calculation goals achieved in this calculator is:
+This is a `back end` of Factorio calculators, which means it mostly solves the
+tedious calculations but only has a simple (and ugly) front end for input and
+visualization. Some specific goals achieved by this calculator are:
 
 * Set intermediate item as input material. The calculator can be set using any
 intermediate material as direct input; this is useful when designing modularized
@@ -44,22 +44,18 @@ coal or even water limitations, nothing has to be left behind.
 the user can force the optimizer using `coal-liquefaction`.
 
 
-### What issues this calculator does not address:
+### What issues this calculator has not addressed yet:
 
-This calculator will never be perfect. Some of not addressed issues are:
+This calculator, as so far, is far from perfect. Some of the knowns issues are:
 
 * Module/beacons. This is important as modules modifies the yielding ratio.
+Should be solved in next major update.
 * Mining cost. All mining costs are currently not included.
-* Power. The output of this back end is a table of recipes with how many times
-they should be executed, regardless of the building to craft these items.
-Features like power consumption can be easily implemented in front end, with an
-analogy unit conversion in real-life calculations.
+* Power consumption. Power is important, while it can be easily solved by the
+front end in analogy of unit conversion. This feature likely will not be included
+in this back end, which is designed to be abstract.
 * Arbitrary precision calculation. Precision loss is innevitable when using bare
-float number calculations. However, this only has notable impacts when input ratio
-is infeasibly large or small (i.e. build a million trillions of `rocket-parts` per
-minute or complete an `stack-inserter` since the biginning of the universe).
-
-The motivation to abstract the back end partially lies in the flexibility in
-future uses. From the point of view of a monkey working in bioinformatics, this
-sort of calculation is extremely similar to dealing with large amount of
-bio/chemical equations.
+float number calculations. However, it only has notable impacts when user inputs
+are in infeasibly large or small quantaties (e.g. build a million trillions of
+`rocket-parts` per minute, or aiming at complete something within period of time
+comparable to that since the biginning of the universe).
