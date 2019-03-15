@@ -19,7 +19,7 @@ class FactorioTunesStub(object):
 
 
 	def register(self,
-			tunedb_t: db_base._FactorioTunesDatabaseWrapperBase,
+			tunedb_t: db_base.AsFactorioTunesDatabase.DB_Base,
 		) -> None:
 		"""
 		register a <tunedb_t> with its search key;
@@ -34,7 +34,7 @@ class FactorioTunesStub(object):
 		FactorioTunesDBKeyExistsError: if try to register a database with
 			existing key;
 		"""
-		if not issubclass(tunedb_t, db_base._FactorioTunesDatabaseWrapperBase):
+		if not issubclass(tunedb_t, db_base.AsFactorioTunesDatabase.DB_Base):
 			raise TypeError("'tunedb_t' must be a decorated by\
 				'AsFactorioTunesDatabase'")
 		_keys = tunedb_t.get_stub_keys()

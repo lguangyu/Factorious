@@ -206,6 +206,9 @@ class PNNodeFlux(PNNodeRequestable,PNNodeDepositable):
 		self.flux = _collections_m_.Counter(flux)
 		self.src_node = None
 		self.dest_node = None
+		# flux class does not need them
+		del self._out_pool
+		del self._depo_pit
 		del self.in_connections
 		del self.out_connections
 		return

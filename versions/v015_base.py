@@ -7,7 +7,7 @@ from . import db_base
 @db_base.AsFactorioTunesDatabase("0.15", "0.15.base", "015")
 class FactorioTunesDB_v015(object):
 	def __init__(self, *ka, **kw):
-		super(self._wrapped_class_original_, self).__init__(*ka, **kw)
+		super(self.strip_decoration(), self).__init__(*ka, **kw)
 		self.RECIPE_JSON = "./versions/recipe.0.15.base.json"
 		self.DEFAULT_YIELD_LEVEL = "normal"
 
