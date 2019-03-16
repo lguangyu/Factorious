@@ -257,58 +257,49 @@ class PNNodeFlux(PNNodeRequestable,PNNodeDepositable):
 		return
 
 
-class GeneralSourceComplex(dict):
+class GeneralSourceSinkComplexBase(dict):
 	"""
-	a collection of sources, with unified interface;
+	manage over a collection of sources/sink, with unified interface;
 	"""
+	_node_type_ = None
+
 	def __init__(self, parent, *ka, **kw):
-		super(GeneralSourceComplex, self).__init__(*ka, **kw)
+		assert issubclass(self._node_type_, PNNodeSource)\
+			or issubclass(self._node_type_, PNNodeSink)
 		self._parent = parent
-		# get all sinks from parent network
-		self.update({s.item: s for s in self._parent.iterate_nodes()\
-			if isinstance(s, PNNodeSource)})
+		# get all sources/sink from parent network
+		self.update({n.item: s for s in self._parent.iterate_nodes()\
+			if isinstance(s, self._node_type_)})
 		return
 
-	def request(self, item_name, count) -> PNNodeSource:
+	def get_node(self, item_name) -> PNNodeSource or PNNodeSink:
 		"""
-		request from this complex, returns the eventually requested source;
-		if the node does not exist, create one;
-		"""
-		if item_name not in self:
-			src = self._parent.create_node(PNNodeSource, item_name, 0.0)
-			self[item_name] = src
-		else:
-			src = self[item_name]
-		assert src.item == item_name, src.item_name + "|" + item_name
-		src.request(item_name, count)
-		return src
-
-
-class GeneralSinkComplex(dict):
-	"""
-	a collection of sinks, with unified interface;
-	"""
-	def __init__(self, parent, *ka, **kw):
-		super(GeneralSinkComplex, self).__init__(*ka, **kw)
-		self._parent = parent
-		# get all sinks from parent network
-		self.update({s.item: s for s in self._parent.iterate_nodes()\
-			if isinstance(s, PNNodeSink)})
-		return
-
-	def deposit(self, item_name, count) -> PNNodeSink:
-		"""
-		deposit to this complex, returns the eventually deposited sink;
-		if the node does not exist, create one;
+		check this complex, returns the found source/sink node;
+		if the node does not exist, create new and return;
 		"""
 		if item_name not in self:
-			sink = self._parent.create_node(PNNodeSink, item_name, 0.0)
-			self[item_name] = sink
+			node = self._parent.create_node(self._node_type_, item_name, 0.0)
+			self[item_name] = node
 		else:
-			sink = self[item_name]
-		assert sink.item == item_name, sink.item_name + "|" + item_name
-		sink.deposit(item_name, count)
-		return sink
+			node = self[item_name]
+		assert node.item == item_name, node.item_name + "|" + item_name
+		return node
+
+
+class GeneralSourceComplex(GeneralSourceSinkComplexBase):
+	"""
+	a collection of sources;
+	"""
+	_node_type_ = PNNodeSource
+	pass
+
+
+class GeneralSinkComplex(GeneralSourceSinkComplexBase):
+	"""
+	a collection of sinks;
+	"""
+	_node_type_ = PNNodeSink
+	pass
 
 
 class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
@@ -483,7 +474,9 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 					# to here means break not called
 					if not found_src:
 						# no source recipe, request from general source
-						src_node = src_x.request(fname, fcount)
+						src_node = src_x.get_node(fname)
+						src_node.request(fname, fcount)
+						# make sure to add a node flux
 						self._get_flux(src_node, node).update({fname: fcount})
 					#elif not _math_m_.isclose(remain, 0.0):
 					else:
@@ -495,6 +488,8 @@ class ProductionNetwork(_production_profiler_m_.ProductionProfiler):
 				found_acp = [q_node.deposit(fname, fcount)[0]\
 					for q_node in recp_nodes]
 				if not any(found_acp):
-					sink_node = sink_x.deposit(fname, fcount)
+					sink_node = sink_x.get_node(fname)
+					sink_node.deposit(fname, fcount)
+					# make sure to add a node flux
 					self._get_flux(node, sink_node).update({fname: fcount})
 		return
