@@ -3,6 +3,7 @@
 from .stub import FactorioTunesDBKeyExistsError, FactorioTunesStub
 
 from . import v015_base
+from . import v016_base
 
 
 # initialize
