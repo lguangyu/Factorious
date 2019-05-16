@@ -8,8 +8,9 @@ from . import v015_base
 # initialize
 _STUB = FactorioTunesStub()
 _STUB.register(v015_base.FactorioTunesDB_v015)
+_STUB.register(v016_base.FactorioTunesDB_v016)
 # set default version
-default = "0.15"
+default = "0.16"
 
 
 # interface function
