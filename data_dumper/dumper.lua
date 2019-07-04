@@ -4,51 +4,62 @@ require("dump_util")
 
 
 local function get_args()
-	local usage = ([[%s <factorio-path> <module-path>
+	local usage = ([[%s <data-path> <module-path>
 
 arguments:
-    factorio-path: path to the Factorio install directory (required)
+    data-path: path to the Factorio/data directory (required)
     module-path: path to the module to be dumped (required)
 ]]):format(arg[0])
 	if (#arg ~= 2) then
 		io.stderr:write("error: insufficient arguments\n\n" .. usage)
 		os.exit(-1)
 	end
-	local factorio_path, module_path = table.unpack(arg)
-	return factorio_path, module_path
+	local data_path, module_path = table.unpack(arg)
+	return data_path, module_path
 end
 
+local function quarantine_load(module_path, module_file, reset_load_flag)
+	--[[
+	load data from Factorio's module.
+	this is essentially done by:
+		require(module_file)
+	i.e. load <module_path>/<module_file>.lua;
+	before we actually do this, the search path must be first added;
+	after loading, the search path will be restored; thus it's ready for load
+	the next module (if needed) to avoid namespace contamination;
+	that is, critical for modules since 'data.lua' commonly exists in every
+	module; we need to clean up the search path to ensure that the newest call
+	to require(module_file) loads the desired file.
+	]]
+	if reset_load_flag == nil then
+		reset_load_flag = true
+	end
 
-local function quarantine_load(module_path)
-	-- temporarily add module_path to the package.path for require modules
-	-- restore package.path after require() to avoid namespace contamination
-	-- especially for data.lua which is identically named by all modules
-
-	-- load module_path/data.lua
+	-- load data.lua
 	local old_package_path = package.path
-	-- add module path
-	local search_path = module_path .. "/?.lua"
-	package.path = package.path .. ";" .. search_path
-	-- load
-	require("data")
-	-- restore old search path
+	package.path = package.path .. ";" .. module_path .. "/?.lua"
+	require(module_file)
+	-- restore old search path and reset the loaded flag
+	-- this will force lua to forget the module is somewhat loaded
 	package.path = old_package_path
-	package.loaded["data"] = nil
+	if reset_load_flag then
+		package.loaded[module_file] = nil
+	end
 	return _G["data"]
 end
 
-
-local function load_modules(factorio_path, module_path)
-	-- dataloader is necessary
-	package.path = package.path .. ";" .. factorio_path .. "/data/core/lualib/?.lua"
-	require("dataloader")
-	-- core maybe referenced by other modules
-	--quarantine_load(factorio_path .. "/data/core")
-	-- read module data
-	quarantine_load(module_path)
+local function load_base_module(data_path)
+	-- this loads necessities, must be done first even before core is loaded
+	package.path = package.path .. ";" .. data_path .. "/core/lualib/?.lua"
+	quarantine_load(data_path .. "/core/lualib", "util", false)
+	quarantine_load(data_path .. "/core/lualib", "dataloader")
+	-- now load core first
+	quarantine_load(data_path .. "/core", "data")
+	_G["data"].is_demo = false
+	-- this loads <data_path>/base/data.lua
+	quarantine_load(data_path .. "/base", "data")
 	return _G["data"]
 end
-
 
 local function extract_recipe_formula(formula)
 	local ret = {}
@@ -67,7 +78,11 @@ local function extract_recipe_formula(formula)
 	ret.results = {}
 	if (formula.results) then
 		for _, v in ipairs(formula.results) do
-			ret.results[v.name] = v.amount * (v.probability or 1.0)
+			if v.name then
+				ret.results[v.name] = v.amount * (v.probability or 1)
+			else
+				ret.results[v[1]] = v[2] * (v.probability or 1)
+			end
 		end
 	else
 		ret.results[formula.result] = formula.result_count or 1
@@ -93,7 +108,6 @@ local function extract_recipe_data(recipe)
 	return ret
 end
 
-
 local function extract_all_recipe_data(recipes)
 	assert(type(recipes) == "table", type(recipes))
 	local ret = {}
@@ -103,10 +117,9 @@ local function extract_all_recipe_data(recipes)
 	return ret
 end
 
-
 function main()
-	local factorio_path, module_path = get_args()
-	load_modules(factorio_path, module_path)
+	local data_path, module_path = get_args()
+	load_base_module(data_path)
 	local recipes = extract_all_recipe_data(_G["data"].raw.recipe)
 	dump_json(io.stdout, recipes)
 	return os.exit(0)

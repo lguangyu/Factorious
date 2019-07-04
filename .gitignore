@@ -1,7 +1,7 @@
 # custom
 .DS_Store
 *.swp
-dev/
+.dev/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

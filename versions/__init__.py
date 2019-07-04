@@ -4,14 +4,16 @@ from .stub import FactorioTunesDBKeyExistsError, FactorioTunesStub
 
 from . import v015_base
 from . import v016_base
+from . import v017_base
 
 
 # initialize
 _STUB = FactorioTunesStub()
 _STUB.register(v015_base.FactorioTunesDB_v015)
 _STUB.register(v016_base.FactorioTunesDB_v016)
+_STUB.register(v017_base.FactorioTunesDB_v017)
 # set default version
-default = "0.16"
+default = "0.17"
 
 
 # interface function
