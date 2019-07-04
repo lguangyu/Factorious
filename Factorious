@@ -46,7 +46,7 @@ def _stage_argparse_get_factorio_version(argv, namespace):
 			else:
 				aliases = ""
 			print("%-8s%s" % (base_key, aliases), file = sys.stdout)
-			ap.exit(0)
+		ap.exit(0)
 	namespace.FACTORIO = versions.get(namespace.factorio_version)
 	return ap, unparsed
 
